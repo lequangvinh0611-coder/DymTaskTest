@@ -1,0 +1,637 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Theme Colors */
+  --color-primary: var(--theme-color, #4f46e5);
+  --color-primary-light: var(--theme-color-light, #eef2ff);
+  --color-primary-dark: var(--theme-color-dark, #3730a3);
+}
+
+:root {
+  --theme-color: #4f46e5;
+  --theme-color-light: #eef2ff;
+  --theme-color-dark: #3730a3;
+}
+
+[data-theme='dark'] {
+  --theme-color: #4f46e5;
+  --theme-color-light: #12102e;
+  --theme-color-dark: #201a61;
+}
+
+/* Custom premium Dark Mode system targeting standard utility classes */
+[data-theme='dark'] {
+  body {
+    background-color: #090d16 !important;
+    color: #f1f5f9 !important;
+  }
+
+  /* Panelled elements, tables, forms, list-containers, dialogs */
+  .bg-white, 
+  [class*="bg-white"],
+  .bg-slate-50\/50 {
+    background-color: #121929 !important; /* solid, clean aesthetic navy/dark slate card color */
+  }
+
+  .bg-slate-50,
+  .bg-slate-100/50,
+  [class*="bg-slate-50"],
+  [class*="bg-slate-100"] {
+    background-color: #090d16 !important; /* deeper body color */
+  }
+
+  /* Inputs, Select selects, buttons, textareas */
+  input, 
+  select, 
+  textarea,
+  .bg-slate-100 {
+    background-color: #090d16 !important;
+    color: #f1f5f9 !important;
+    border-color: #212c45 !important;
+  }
+
+  /* Unified borders */
+  .border,
+  .border-slate-200,
+  .border-slate-100,
+  .border-slate-300,
+  [class*="border-slate-"],
+  [class*="divide-slate-"] {
+    border-color: #1c263d !important;
+  }
+
+  /* Standard text readability mapping */
+  .text-slate-900,
+  .text-slate-800,
+  .text-slate-700,
+  .text-slate-600,
+  .text-indigo-950,
+  .text-indigo-900 {
+    color: #f8fafc !important;
+  }
+
+  .text-slate-500,
+  .text-slate-400 {
+    color: #889bb0 !important; /* soft legible muted */
+  }
+
+  /* Hover effect updates */
+  .hover\:bg-slate-50:hover,
+  .hover\:bg-slate-100:hover,
+  [class*="hover:bg-slate-"]:hover {
+    background-color: #192136 !important;
+  }
+
+  /* Navigation Sidebar is already solid dark-slate, lets make it blend */
+  aside {
+    background-color: #070a10 !important;
+    border-right-color: #192136 !important;
+  }
+
+  /* Modals overlay rendering */
+  .bg-slate-900\/50,
+  .bg-slate-900\/60 {
+    background-color: rgba(5, 7, 12, 0.72) !important;
+  }
+
+  /* Headers */
+  h1, h2, h3, h4, h5, h6 {
+    color: #ffffff !important;
+  }
+
+  /* Explicit premium Tag Badge styling in Dark Mode (fixes white-out issue) */
+  span.inline-block.bg-slate-50,
+  span.inline-block.bg-slate-100 {
+    background-color: #1f293d !important;
+    color: #94a3b8 !important;
+    border-color: #2e3e5c !important;
+  }
+
+  /* High legibility color mappings for specific categories (fixes dark-on-dark in dashboard & list) */
+  .text-blue-600, .text-blue-750, .text-blue-800 {
+    color: #38bdf8 !important;
+  }
+  .text-amber-600, .text-amber-700, .text-amber-800 {
+    color: #fbbf24 !important;
+  }
+  .text-purple-600, .text-purple-700, .text-purple-800 {
+    color: #c084fc !important;
+  }
+  .text-emerald-500, .text-emerald-600, .text-emerald-700, .text-emerald-800 {
+    color: #34d399 !important;
+  }
+  .text-rose-600, .text-rose-700, .text-rose-800,
+  .text-red-500, .text-red-600, .text-red-700, .text-red-650, .text-red-655 {
+    color: #f87171 !important;
+  }
+  .text-indigo-600, .text-indigo-700, .text-indigo-800 {
+    color: #818cf8 !important;
+  }
+  .text-indigo-850, .text-indigo-950 {
+    color: #e0e7ff !important;
+  }
+
+  /* Frequency and status badge background overrides in Dark Mode */
+  .bg-blue-50 {
+    background-color: rgba(56, 189, 248, 0.15) !important;
+    color: #38bdf8 !important;
+    border-color: rgba(56, 189, 248, 0.3) !important;
+  }
+  .bg-red-50 {
+    background-color: rgba(239, 68, 68, 0.15) !important;
+    color: #f87171 !important;
+    border-color: rgba(239, 68, 68, 0.3) !important;
+  }
+  .bg-amber-50 {
+    background-color: rgba(251, 191, 36, 0.15) !important;
+    color: #fbbf24 !important;
+    border-color: rgba(251, 191, 36, 0.3) !important;
+  }
+  .bg-purple-50 {
+    background-color: rgba(192, 132, 252, 0.15) !important;
+    color: #c084fc !important;
+    border-color: rgba(192, 132, 252, 0.3) !important;
+  }
+  .bg-emerald-50 {
+    background-color: rgba(52, 211, 153, 0.15) !important;
+    color: #34d399 !important;
+    border-color: rgba(52, 211, 153, 0.3) !important;
+  }
+  .bg-rose-50 {
+    background-color: rgba(248, 113, 113, 0.15) !important;
+    color: #f87171 !important;
+    border-color: rgba(248, 113, 113, 0.3) !important;
+  }
+  .bg-indigo-50\/40 {
+    background-color: rgba(129, 140, 248, 0.12) !important;
+    color: #e0e7ff !important;
+    border-color: rgba(129, 140, 248, 0.25) !important;
+  }
+  
+  /* Additional roadmap list background tweaks in Dark Mode */
+  .bg-blue-50\/45 {
+    background-color: rgba(56, 189, 248, 0.12) !important;
+    border-color: rgba(56, 189, 248, 0.25) !important;
+  }
+  .bg-amber-50\/45 {
+    background-color: rgba(251, 191, 36, 0.12) !important;
+    border-color: rgba(251, 191, 36, 0.25) !important;
+  }
+  .bg-emerald-50\/45 {
+    background-color: rgba(52, 211, 153, 0.12) !important;
+    border-color: rgba(52, 211, 153, 0.25) !important;
+  }
+  .bg-rose-50\/45 {
+    background-color: rgba(248, 113, 113, 0.12) !important;
+    border-color: rgba(248, 113, 113, 0.25) !important;
+  }
+
+  /* Selection and inputs styling stability under Dark Mode */
+  select option {
+    background-color: #121929 !important;
+    color: #f1f5f9 !important;
+  }
+
+  /* Make date/time picker browser indicators white in Dark Mode */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) !important;
+    cursor: pointer;
+  }
+
+  /* Make DateRangePicker button consistent with inputs in Dark Mode */
+  .daterange-picker-btn {
+    background-color: #090d16 !important;
+    color: #f1f5f9 !important;
+    border-color: #212c45 !important;
+  }
+  .daterange-picker-btn:hover {
+    background-color: #192136 !important;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+  }
+}
+
+.geometric-border {
+  @apply border border-slate-200;
+}
+
+.premium-divide > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(148, 163, 184, 0.12) !important;
+}
+
+[data-theme='dark'] .premium-divide > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Fix CSS sticky table header border-collapse shifting bug in Chrome/Firefox */
+table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+table thead, table tbody, table tr {
+  border: none !important;
+}
+
+table th, table td {
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12) !important;
+}
+
+[data-theme='dark'] table th, 
+[data-theme='dark'] table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+
+.geometric-shadow {
+  @apply shadow-sm;
+}
+
+.code-editor-shadow {
+  @apply shadow-2xl;
+}
+
+/* ==========================================
+   DARK MODE OVERRIDES (9 LOCATIONS + UPDATES)
+   ========================================== */
+
+/* Thiết lập nền cho main content zone đồng bộ với body */
+[data-theme='dark'] main {
+  background-color: #090d16 !important;
+}
+
+/* Chi tiết To-Do List: Điều chỉnh khung Task Status sang màu tối sang trọng */
+[data-theme='dark'] div.bg-slate-50.border-slate-120 {
+  background-color: #1a2333 !important;
+  border-color: #2b3952 !important;
+}
+
+/* Giao diện tạo task: Chuyển toàn bộ thẻ cha và vùng chọn Deadline sang tone tối */
+[data-theme='dark'] .bg-slate-50.border-slate-100.rounded-xl {
+  background-color: #121929 !important;
+  border-color: #1c263d !important;
+}
+[data-theme='dark'] input[type="time"],
+[data-theme='dark'] div.bg-slate-100\/60 {
+  background-color: #090d16 !important;
+  color: #f1f5f9 !important;
+  border-color: #212c45 !important;
+}
+
+/* Giao diện chi tiết Task Manager: Biến khung thông tin tổng hợp thành bo góc nền sẫm hài hoà */
+[data-theme='dark'] div.grid-cols-2.bg-slate-50 {
+  background-color: #1a2333 !important;
+  border-color: #2b3952 !important;
+}
+[data-theme='dark'] div.grid-cols-2.bg-slate-50 span.text-slate-700 {
+  color: #e2e8f0 !important; /* Chữ hiển thị xám sáng tăng tương phản */
+}
+
+/* Viền của Dashboard: Tinh chỉnh lại toàn bộ viền và bóng đổ tối */
+[data-theme='dark'] #weekly-roadmap-section,
+[data-theme='dark'] [id^="card-"] {
+  border-color: #1c263d !important;
+  box-shadow: none !important;
+}
+
+/* Settings Tab Switcher: Chuyển đổi nền thanh chọn tab sang màu xanh đen tối */
+[data-theme='dark'] .bg-slate-100\/80 {
+  background-color: #141c2c !important;
+  border-color: #212c45 !important;
+}
+[data-theme='dark'] button.bg-white.text-slate-800 {
+  background-color: #25334f !important;
+  color: #ffffff !important;
+  border-color: #3b4f73 !important;
+}
+
+/* Khung Add User: Khắc phục vùng hiển thị phòng ban sáng màu */
+[data-theme='dark'] div.bg-slate-50.border-slate-150 {
+  background-color: #161f30 !important;
+  border-color: #25324b !important;
+}
+
+/* Add Project & Add Team: Đồng bộ hoá và làm sẫm hoá vùng Warning Note */
+[data-theme='dark'] .bg-slate-50.border-slate-150 {
+  background-color: #141c2c !important;
+  border-color: #212c45 !important;
+}
+[data-theme='dark'] .bg-slate-50.border-slate-150 p.text-slate-500 {
+  color: #94a3b8 !important; /* Chữ note màu xám nhạt dễ đọc */
+}
+
+/* Add Tag: Đảm bảo bảng dữ liệu, tiêu đề và các icon hành động khớp màu Dark mượt mà */
+[data-theme='dark'] .table,
+[data-theme='dark'] th {
+  background-color: #0d1322 !important;
+  color: #94a3b8 !important;
+  border-bottom-color: #1e2b40 !important;
+}
+
+/* Khắc phục nền sáng & bóng viền của Sub-tasks trong To-Do List Drawer và Task Manager Details Drawer */
+[data-theme='dark'] div.border-slate-100.bg-white,
+[data-theme='dark'] div.border-slate-100.hover\:border-blue-100.bg-white {
+  background-color: #0d1322 !important;
+  border-color: #1e2b40 !important;
+  box-shadow: none !important;
+}
+[data-theme='dark'] span.bg-slate-50.text-slate-500.border-slate-100 {
+  background-color: #161f30 !important;
+  color: #94a3b8 !important;
+  border-color: #1e2b40 !important;
+}
+[data-theme='dark'] div.bg-slate-50.border-slate-100 {
+  background-color: #141c2c !important;
+  border-color: #212c45 !important;
+}
+[data-theme='dark'] input.bg-slate-50.border-slate-200,
+[data-theme='dark'] input.bg-slate-50.border-slate-200:focus {
+  background-color: #090d16 !important;
+  color: #f1f5f9 !important;
+  border-color: #212c45 !important;
+}
+[data-theme='dark'] input.bg-white.border-slate-200,
+[data-theme='dark'] input.bg-white.border-slate-200:focus,
+[data-theme='dark'] textarea.bg-white.border-slate-200,
+[data-theme='dark'] textarea.bg-white.border-slate-200:focus,
+[data-theme='dark'] select.bg-white.border-slate-200 {
+  background-color: #090d16 !important;
+  color: #f1f5f9 !important;
+  border-color: #212c45 !important;
+}
+[data-theme='dark'] select.bg-slate-50.border-slate-200 {
+  background-color: #090d16 !important;
+  color: #f1f5f9 !important;
+  border-color: #212c45 !important;
+}
+
+/* Đồng bộ hóa màu sắc nhãn dán loại công việc trong chế độ Dark */
+[data-theme='dark'] .bg-purple-50 {
+  background-color: rgba(192, 132, 252, 0.15) !important;
+  color: #c084fc !important;
+  border-color: rgba(192, 132, 252, 0.3) !important;
+}
+[data-theme='dark'] .bg-emerald-50 {
+  background-color: rgba(52, 211, 153, 0.15) !important;
+  color: #34d399 !important;
+  border-color: rgba(52, 211, 153, 0.3) !important;
+}
+[data-theme='dark'] .bg-rose-50 {
+  background-color: rgba(248, 113, 113, 0.15) !important;
+  color: #f87171 !important;
+  border-color: rgba(248, 113, 113, 0.3) !important;
+}
+
+/* Khắc phục nền sáng khó nhìn của Dashboard và icon card đầu tiên trong chế độ Dark */
+[data-theme='dark'] .bg-slate-50\/40 {
+  background-color: #090d16 !important;
+}
+[data-theme='dark'] .bg-indigo-50 {
+  background-color: rgba(129, 140, 248, 0.15) !important;
+  color: #818cf8 !important;
+  border-color: rgba(129, 140, 248, 0.3) !important;
+}
+
+/* Đồng bộ hóa phần Note và khung Drawer 4 nút thao tác trong chế độ Dark */
+[data-theme='dark'] .note-section-wrapper {
+  background-color: #161f30 !important;
+  border-color: #25324b !important;
+}
+[data-theme='dark'] .note-section-wrapper .note-text-content {
+  color: #e2e8f0 !important;
+}
+[data-theme='dark'] .template-actions-footer {
+  background-color: #0d1322 !important;
+  border-top-color: #1e2b40 !important;
+}
+[data-theme='dark'] .template-actions-footer button.bg-slate-100 {
+  background-color: #161f30 !important;
+  color: #cbd5e1 !important;
+  border-color: #25324b !important;
+}
+[data-theme='dark'] .template-actions-footer button.bg-slate-100:hover {
+  background-color: #222f46 !important;
+}
+
+
+/* =======================================================
+   PREMIUM LIGHT & DARK THEMES FOR ROADMAP COMPONENT
+   ======================================================= */
+
+/* --- 1. LIGHT MODE SPECIFICS --- */
+.roadmap-hero-today {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(129, 140, 248, 0.03)) !important;
+  border-color: rgba(79, 70, 229, 0.25) !important;
+  box-shadow: inset 0 1px 2px rgba(79, 70, 229, 0.05);
+}
+.roadmap-hero-standard {
+  background: linear-gradient(135deg, rgba(241, 245, 249, 0.9), rgba(248, 250, 252, 0.4)) !important;
+  border-color: rgba(226, 232, 240, 0.8) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+.roadmap-hero-standard:hover {
+  border-color: rgba(79, 70, 229, 0.15) !important;
+}
+
+/* Category rows in Light Mode */
+.roadmap-cat-row {
+  border-width: 1px !important;
+  border-style: solid !important;
+}
+.roadmap-cat-daily {
+  background-color: rgba(56, 189, 248, 0.08) !important;
+  border-color: rgba(56, 189, 248, 0.25) !important;
+}
+.roadmap-cat-daily:hover {
+  background-color: rgba(56, 189, 248, 0.12) !important;
+}
+.roadmap-cat-weekly {
+  background-color: rgba(251, 191, 36, 0.08) !important;
+  border-color: rgba(251, 191, 36, 0.25) !important;
+}
+.roadmap-cat-weekly:hover {
+  background-color: rgba(251, 191, 36, 0.12) !important;
+}
+.roadmap-cat-monthly {
+  background-color: rgba(52, 211, 153, 0.08) !important;
+  border-color: rgba(52, 211, 153, 0.25) !important;
+}
+.roadmap-cat-monthly:hover {
+  background-color: rgba(52, 211, 153, 0.12) !important;
+}
+.roadmap-cat-onetime {
+  background-color: rgba(248, 113, 113, 0.08) !important;
+  border-color: rgba(248, 113, 113, 0.25) !important;
+}
+.roadmap-cat-onetime:hover {
+  background-color: rgba(248, 113, 113, 0.12) !important;
+}
+
+/* --- 2. PREMIUM DARK MODE SPECIFICS --- */
+[data-theme='dark'] {
+  .roadmap-hero-today {
+    background: linear-gradient(135deg, rgba(129, 140, 248, 0.15), rgba(79, 70, 229, 0.04)) !important;
+    border-color: rgba(129, 140, 248, 0.4) !important;
+    box-shadow: none !important;
+  }
+  .roadmap-hero-standard {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.45), rgba(15, 23, 42, 0.25)) !important;
+    border-color: rgba(226, 232, 240, 0.06) !important;
+    box-shadow: none !important;
+  }
+  .roadmap-hero-standard:hover {
+    border-color: rgba(129, 140, 248, 0.2) !important;
+  }
+
+  /* Category rows in Dark Mode for incredible high-contrast readability */
+  .roadmap-cat-daily {
+    background-color: rgba(56, 189, 248, 0.12) !important;
+    border-color: rgba(56, 189, 248, 0.22) !important;
+  }
+  .roadmap-cat-daily:hover {
+    background-color: rgba(56, 189, 248, 0.18) !important;
+  }
+  .roadmap-cat-weekly {
+    background-color: rgba(251, 191, 36, 0.11) !important;
+    border-color: rgba(251, 191, 36, 0.22) !important;
+  }
+  .roadmap-cat-weekly:hover {
+    background-color: rgba(251, 191, 36, 0.17) !important;
+  }
+  .roadmap-cat-monthly {
+    background-color: rgba(52, 211, 153, 0.11) !important;
+    border-color: rgba(52, 211, 153, 0.22) !important;
+  }
+  .roadmap-cat-monthly:hover {
+    background-color: rgba(52, 211, 153, 0.17) !important;
+  }
+  .roadmap-cat-onetime {
+    background-color: rgba(248, 113, 113, 0.11) !important;
+    border-color: rgba(248, 113, 113, 0.22) !important;
+  }
+  .roadmap-cat-onetime:hover {
+    background-color: rgba(248, 113, 113, 0.17) !important;
+  }
+}
+
+/* Custom premium changed notes styles in dark mode */
+[data-theme='dark'] .note-section-wrapper.is-note-changed {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  border-color: rgba(239, 68, 68, 0.35) !important;
+}
+[data-theme='dark'] .note-section-wrapper.is-note-changed .note-text-content {
+  color: #f87171 !important;
+}
+
+/* Bulletproof native browser date-picker override to force white icon in dark mode */
+[data-theme='dark'] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) !important;
+  opacity: 1 !important;
+}
+
+/* User Guide Modal Dark Mode Specifics (Fix Glare & Contrast) */
+[data-theme='dark'] .user-guide-container {
+  background-color: #0b0f19 !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+  color: #cbd5e1 !important;
+}
+
+[data-theme='dark'] .user-guide-container h3,
+[data-theme='dark'] .user-guide-container h4,
+[data-theme='dark'] .user-guide-container h5 {
+  color: #f1f5f9 !important;
+}
+
+[data-theme='dark'] .user-guide-container div.bg-gradient-to-r.from-slate-50 {
+  background: linear-gradient(to right, #070a11, #0b0f19) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+
+[data-theme='dark'] .user-guide-container div.border-b.border-t.border-slate-100,
+[data-theme='dark'] .user-guide-container div.border-slate-100 {
+  border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-theme='dark'] .user-guide-container .text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+[data-theme='dark'] .user-guide-container .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+[data-theme='dark'] .user-guide-container .text-slate-550 {
+  color: #cbd5e1 !important;
+}
+
+[data-theme='dark'] .user-guide-container .text-slate-500,
+[data-theme='dark'] .user-guide-container .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+[data-theme='dark'] .user-guide-container div.bg-slate-50 {
+  background-color: #121929 !important;
+  border-color: #1c263d !important;
+}
+
+[data-theme='dark'] .user-guide-container div.bg-white {
+  background-color: #162032 !important;
+  border-color: #25334f !important;
+}
+
+[data-theme='dark'] .user-guide-container div.divide-y,
+[data-theme='dark'] .user-guide-container div.divide-slate-150 {
+  border-color: rgba(255, 255, 255, 0.05) !important;
+  background-color: transparent !important;
+}
+
+[data-theme='dark'] .user-guide-container div.divide-y > *,
+[data-theme='dark'] .user-guide-container div.divide-slate-150 > * {
+  border-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-theme='dark'] .user-guide-container div.bg-slate-100 {
+  background-color: #162032 !important;
+  border-color: #212d42 !important;
+}
+
+[data-theme='dark'] .user-guide-container .bg-slate-550\/5 {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+/* Active buttons and switcher tabs */
+[data-theme='dark'] .user-guide-container button.bg-white {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme='dark'] .user-guide-container button.text-indigo-600 {
+  background-color: #1e293b !important;
+  color: #818cf8 !important;
+  border-color: rgba(129, 140, 248, 0.4) !important;
+}
+
+[data-theme='dark'] .user-guide-container button.bg-indigo-600 {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+}
+
+[data-theme='dark'] .user-guide-container button.bg-indigo-600:hover {
+  background-color: #4338ca !important;
+}
+
+
+
