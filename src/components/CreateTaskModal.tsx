@@ -66,21 +66,10 @@ interface TaskVersion {
 }
 
 interface TaskMetadata {
-  description: string;
   project_name: string;
   team_name: string;
   tag_name: string;
-  deadline_time: string;
-  deadline_days: string;
-  sub_tasks: SubTask[];
-  note?: string;
-  todo_status?: string;
-  todo_date?: string;
-  last_updated_by?: string;
-  last_updated_at?: string;
-  versions?: TaskVersion[];
-  completions?: Record<string, any>;
-  onetime_targets?: any[];
+  note: string;
 }
 
 interface DbTask {
@@ -94,6 +83,7 @@ interface DbTask {
   actual_time: number;
   created_at: string;
   display_id?: number | null;
+  subtasks?: any[];
 }
 
 interface CreateTaskModalProps {
@@ -142,35 +132,24 @@ const convertToDisplayTime = (time24: string): string => {
   return time24;
 };
 
+// Helper representation of parsing functions
+
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
-    description: '',
     project_name: '',
     team_name: '',
     tag_name: '',
-    deadline_time: '09:00 AM',
-    deadline_days: 'Mon - Fri',
-    sub_tasks: [],
-    note: '',
-    versions: [],
-    completions: {}
+    note: ''
   };
 
   if (!rawDescription) return defaultMeta;
 
   if (typeof rawDescription === 'object') {
     return {
-      description: rawDescription.description || '',
       project_name: rawDescription.project_name || '',
       team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
-      deadline_time: rawDescription.deadline_time || '09:00 AM',
-      deadline_days: rawDescription.deadline_days || 'Mon - Fri',
-      sub_tasks: Array.isArray(rawDescription.sub_tasks) ? rawDescription.sub_tasks : [],
-      note: rawDescription.note || '',
-      versions: rawDescription.versions || [],
-      completions: rawDescription.completions || {},
-      onetime_targets: rawDescription.onetime_targets || []
+      note: rawDescription.note || rawDescription.description || ''
     };
   }
 
@@ -180,27 +159,20 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
       try {
         const parsed = JSON.parse(trimmed);
         return {
-          description: parsed.description || '',
           project_name: parsed.project_name || '',
           team_name: parsed.team_name || '',
           tag_name: parsed.tag_name || '',
-          deadline_time: parsed.deadline_time || '09:00 AM',
-          deadline_days: parsed.deadline_days || 'Mon - Fri',
-          sub_tasks: Array.isArray(parsed.sub_tasks) ? parsed.sub_tasks : [],
-          note: parsed.note || '',
-          versions: parsed.versions || [],
-          completions: parsed.completions || {},
-          onetime_targets: parsed.onetime_targets || []
+          note: parsed.note || parsed.description || ''
         };
       } catch {
-        // JSON format issue, fallback to normal values
+        // Fallback
       }
     }
   }
 
   return {
     ...defaultMeta,
-    description: String(rawDescription)
+    note: String(rawDescription)
   };
 };
 
@@ -214,9 +186,9 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
   const isEditMode = !!taskToEdit;
 
   const [masterData, setMasterData] = useState<{
-    projects: string[];
-    teams: string[];
-    tags: string[];
+    projects: { id: string; name: string }[];
+    teams: { id: string; name: string }[];
+    tags: { id: string; name: string }[];
     assignees: string[];
   }>({
     projects: [],
@@ -269,21 +241,21 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
   // State to track which subtask's dropdown select is currently active
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
 
-  // Fetch Master Data on open
+  // Fetch Master Data on open Including IDs for Relations
   useEffect(() => {
     if (isOpen) {
       const fetchMasterData = async () => {
         try {
           const [projRes, teamRes, tagRes, userRes] = await Promise.all([
-            supabase.from('projects').select('name').eq('is_active', true).order('name', { ascending: true }),
-            supabase.from('teams').select('name').eq('is_active', true).order('name', { ascending: true }),
-            supabase.from('tags').select('name').eq('is_active', true).order('name', { ascending: true }),
+            supabase.from('projects').select('id, name').eq('is_active', true).order('name', { ascending: true }),
+            supabase.from('teams').select('id, name').eq('is_active', true).order('name', { ascending: true }),
+            supabase.from('tags').select('id, name').eq('is_active', true).order('name', { ascending: true }),
             supabase.from('users').select('name').eq('status', 'ACTIVE').order('name', { ascending: true })
           ]);
 
-          const projectsList = (projRes.data || []).map((p: any) => p.name);
-          const teamsList = (teamRes.data || []).map((t: any) => t.name);
-          const tagsList = (tagRes.data || []).map((t: any) => t.name);
+          const projectsList = (projRes.data || []).map((p: any) => ({ id: p.id, name: p.name }));
+          const teamsList = (teamRes.data || []).map((t: any) => ({ id: t.id, name: t.name }));
+          const tagsList = (tagRes.data || []).map((t: any) => ({ id: t.id, name: t.name }));
           const assigneesList = (userRes.data || []).map((u: any) => u.name);
 
           setMasterData({
@@ -305,22 +277,30 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
     if (isOpen) {
       if (taskToEdit) {
         const meta = parseTaskDescription(taskToEdit.description);
-        setTaskName(taskToEdit.title || '');
-        setProject(meta.project_name || '');
-        setTag(meta.tag_name || '');
-        setTeam(meta.team_name || '');
-        setTaskType(taskToEdit.task_type || '');
-        setNote(meta.note || '');
+        
+        // Prefer direct RDBMS relation properties, fallback to old JSON meta
+        const projName = (taskToEdit as any).projects?.name || meta.project_name || '';
+        const tagName = (taskToEdit as any).tags?.name || meta.tag_name || '';
+        const teamName = (taskToEdit as any).teams?.name || meta.team_name || '';
+        const dbNote = taskToEdit.description && !taskToEdit.description.startsWith('{') ? taskToEdit.description : (meta.note || '');
+
+        setTaskName(taskToEdit.title || (taskToEdit as any).task_name || '');
+        setProject(projName);
+        setTag(tagName);
+        setTeam(teamName);
+        setTaskType(taskToEdit.task_type || (taskToEdit as any).type || '');
+        setNote(dbNote);
 
         // Parse structures matching exact time elements
-        const currentDeadlineTime = meta.deadline_time || '';
+        const currentDeadlineTime = (taskToEdit as any).deadline_time || '';
         if (currentDeadlineTime) {
           setDeadlineTime24h(convertTo24h(currentDeadlineTime));
         } else {
           setDeadlineTime24h('');
         }
 
-         const daysStr = meta.deadline_days || '';
+        const daysInput = (taskToEdit as any).deadline_days;
+        const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : (daysInput || '');
         if (taskToEdit.task_type === 'DAILY') {
           // Defaults
         } else if (taskToEdit.task_type === 'WEEKLY') {
@@ -330,42 +310,53 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           setMonthlyDays(daysStr);
         } else if (taskToEdit.task_type === 'ONETIME') {
           setOneTimeDate(daysStr);
-          const targets = meta.onetime_targets || [];
-          if (targets.length > 0) {
-            const sorted = [...targets].sort((a: any, b: any) => (a.date || '').localeCompare(b.date || ''));
-            setOnetimeStartDate(sorted[0]?.date || '');
-            setOnetimeEndDate(sorted[sorted.length - 1]?.date || '');
-            setOnetimeTargets(targets.map((tgt: any) => ({
-              id: tgt.id || Math.random().toString(36).substring(2, 9),
-              date: tgt.date || '',
-              time: convertTo24h(tgt.time)
-            })));
-          } else {
-            setOnetimeStartDate(daysStr);
-            setOnetimeEndDate(daysStr);
-            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || '17:00') }]);
-          }
+          const dates = daysStr.includes('~') ? daysStr.split('~').map(d => d.trim()) : [daysStr.trim()];
+          const st = dates[0] || '';
+          const en = dates[1] || dates[0] || '';
+          setOnetimeStartDate(st);
+          setOnetimeEndDate(en);
+          const dateList = getDatesInRange(st, en);
+          setOnetimeTargets(dateList.map(dt => ({
+            id: Math.random().toString(36).substring(2, 9),
+            date: dt,
+            time: currentDeadlineTime || '17:00'
+          })));
         }
 
-        setSubTasks(meta.sub_tasks || []);
+        const initialSubTasks = (taskToEdit.subtasks && taskToEdit.subtasks.length > 0)
+          ? taskToEdit.subtasks.map((st: any) => ({
+              id: st.id || st.subtask_id || Math.random().toString(36).substring(2, 9),
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes
+            }))
+          : [];
+        setSubTasks(initialSubTasks);
       } else if (taskToClone) {
         const meta = parseTaskDescription(taskToClone.description);
-        // Prefix title to indicate it's custom clone or just keep the same name as you requested: "dùng lại toàn bộ thông tin của task đó (khác task ID)"
-        setTaskName(taskToClone.title || '');
-        setProject(meta.project_name || '');
-        setTag(meta.tag_name || '');
-        setTeam(meta.team_name || '');
-        setTaskType(taskToClone.task_type || '');
-        setNote(meta.note || '');
+        
+        // Prefer direct RDBMS relation properties, fallback to old JSON meta
+        const projName = (taskToClone as any).projects?.name || meta.project_name || '';
+        const tagName = (taskToClone as any).tags?.name || meta.tag_name || '';
+        const teamName = (taskToClone as any).teams?.name || meta.team_name || '';
+        const dbNote = taskToClone.description && !taskToClone.description.startsWith('{') ? taskToClone.description : (meta.note || '');
 
-        const currentDeadlineTime = meta.deadline_time || '';
+        setTaskName(taskToClone.title || (taskToClone as any).task_name || '');
+        setProject(projName);
+        setTag(tagName);
+        setTeam(teamName);
+        setTaskType(taskToClone.task_type || (taskToClone as any).type || '');
+        setNote(dbNote);
+
+        const currentDeadlineTime = (taskToClone as any).deadline_time || '';
         if (currentDeadlineTime) {
           setDeadlineTime24h(convertTo24h(currentDeadlineTime));
         } else {
           setDeadlineTime24h('');
         }
 
-        const daysStr = meta.deadline_days || '';
+        const daysInput = (taskToClone as any).deadline_days;
+        const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : (daysInput || '');
         if (taskToClone.task_type === 'DAILY') {
           // Defaults
         } else if (taskToClone.task_type === 'WEEKLY') {
@@ -375,29 +366,29 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           setMonthlyDays(daysStr);
         } else if (taskToClone.task_type === 'ONETIME') {
           setOneTimeDate(daysStr);
-          const targets = meta.onetime_targets || [];
-          if (targets.length > 0) {
-            const sorted = [...targets].sort((a: any, b: any) => (a.date || '').localeCompare(b.date || ''));
-            setOnetimeStartDate(sorted[0]?.date || '');
-            setOnetimeEndDate(sorted[sorted.length - 1]?.date || '');
-            setOnetimeTargets(targets.map((tgt: any) => ({
-              id: tgt.id || Math.random().toString(36).substring(2, 9),
-              date: tgt.date || '',
-              time: convertTo24h(tgt.time)
-            })));
-          } else {
-            setOnetimeStartDate(daysStr);
-            setOnetimeEndDate(daysStr);
-            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || '17:00') }]);
-          }
+          const dates = daysStr.includes('~') ? daysStr.split('~').map(d => d.trim()) : [daysStr.trim()];
+          const st = dates[0] || '';
+          const en = dates[1] || dates[0] || '';
+          setOnetimeStartDate(st);
+          setOnetimeEndDate(en);
+          const dateList = getDatesInRange(st, en);
+          setOnetimeTargets(dateList.map(dt => ({
+            id: Math.random().toString(36).substring(2, 9),
+            date: dt,
+            time: currentDeadlineTime || '17:00'
+          })));
         }
 
         // Generate brand new client IDs for sub_tasks to prevent overlap key rendering references
-        const clonedSubtasks = (meta.sub_tasks || []).map((sb: any) => ({
-          ...sb,
-          id: Math.random().toString(36).substring(2, 9)
-        }));
-        setSubTasks(clonedSubtasks);
+        const initialClonedSubTasks = (taskToClone.subtasks && taskToClone.subtasks.length > 0)
+          ? taskToClone.subtasks.map((st: any) => ({
+              id: Math.random().toString(36).substring(2, 9),
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes
+            }))
+          : [];
+        setSubTasks(initialClonedSubTasks);
       } else {
         // Reset inputs on Create New to empty / unselected as requested
         setTaskName('');
@@ -583,19 +574,30 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
 
     setLoading(true);
     try {
-      // Compute the deadline days string context
+      // Find UUID relations from Master Data safely
+      const selectedProjectObj = masterData.projects.find(p => p.name === project || p.id === project);
+      const selectedTeamObj = masterData.teams.find(t => t.name === team || t.id === team);
+      const selectedTagObj = masterData.tags.find(t => t.name === tag || t.id === tag);
+
+      // Compute the deadline days string context for DB and logging
       const sortedTargets = [...onetimeTargets].sort((a, b) => a.date.localeCompare(b.date));
       let computedDeadlineDays = 'Mon - Fri';
+      let deadlineDaysArray: string[] = [];
+
       if (taskType === 'DAILY') {
         computedDeadlineDays = 'Mon - Fri';
+        deadlineDaysArray = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
       } else if (taskType === 'WEEKLY') {
         computedDeadlineDays = selectedDays.join(', ');
+        deadlineDaysArray = selectedDays;
       } else if (taskType === 'MONTHLY') {
         computedDeadlineDays = monthlyDays || '10, 20';
+        deadlineDaysArray = monthlyDays.split(/[\s,]+/).map(d => d.trim()).filter(Boolean);
       } else if (taskType === 'ONETIME') {
         const firstDate = sortedTargets[0]?.date || '';
         const lastDate = sortedTargets[sortedTargets.length - 1]?.date || '';
         computedDeadlineDays = firstDate === lastDate ? firstDate : `${firstDate} ~ ${lastDate}`;
+        deadlineDaysArray = sortedTargets.map(t => t.date);
       }
 
       const formattedDeadlineTime = convertToDisplayTime(taskType === 'ONETIME' ? (sortedTargets[0]?.time || '17:00') : deadlineTime24h);
@@ -620,7 +622,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
       const todayStr = getTodayDateString();
       const yesterdayStr = getYesterdayDateString(todayStr);
 
-      const oldMeta = isEditMode && taskToEdit ? parseTaskDescription(taskToEdit.description) : null;
+      const oldMeta: any = isEditMode && taskToEdit ? parseTaskDescription(taskToEdit.description) : null;
       let updatedVersions = oldMeta?.versions || [];
 
       if (isEditMode && taskToEdit && oldMeta) {
@@ -720,55 +722,161 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         ? (mappedOnetimeTargets?.some(t => t.todo_status === 'NEW'))
         : true;
 
-      const metadata: TaskMetadata = {
-        description: '',
+      // Clean metadata payload - contains only 4 static properties as requested
+      const metadataForDb = {
         project_name: project,
         team_name: team,
         tag_name: tag,
-        deadline_time: formattedDeadlineTime,
-        deadline_days: computedDeadlineDays,
-        sub_tasks: subTasks,
-        note: note.trim(),
-        todo_date: taskType === 'ONETIME' ? (sortedTargets[0]?.date || '') : undefined,
-        todo_status: taskType === 'ONETIME' ? (hasUnfinishedTarget ? 'NEW' : 'DONE') : undefined,
-        last_updated_by: profile?.name || 'Unknown',
-        last_updated_at: new Date().toISOString(),
-        completions: updatedCompletions,
-        versions: updatedVersions,
-        onetime_targets: mappedOnetimeTargets
+        note: note.trim()
       };
 
+      // Construct compliant RDBMS payload with matching properties for schema compatibility
       const payload = {
         title: taskName.trim(),
-        description: serializeTaskDescription(metadata),
+        description: JSON.stringify(metadataForDb), // description now holds clean stringified JSON of 4 static properties
         task_type: taskType,
         est_time: totalEstMinutes,
         status: hasUnfinishedTarget ? 'ON' : 'OFF',
         is_active: !!hasUnfinishedTarget,
-        actual_time: isEditMode && taskToEdit ? taskToEdit.actual_time : 0
+        actual_time: isEditMode && taskToEdit ? taskToEdit.actual_time : 0,
+
+        // Direct relational foreign keys (Notice: no team_id or team_ids column in database schema)
+        project_id: selectedProjectObj?.id || null,
+        tag_id: selectedTagObj?.id || null,
+        deadline_time: deadlineTime24h ? (deadlineTime24h.includes(':') && deadlineTime24h.split(':').length === 2 ? `${deadlineTime24h}:00` : deadlineTime24h) : null,
+        deadline_days: computedDeadlineDays // Direct flat string for the TEXT column
       };
 
       if (isEditMode && taskToEdit) {
-        const { error } = await supabase
+        // A. Cập nhật task bản mẫu trong bảng tasks
+        const { error: taskError } = await supabase
           .from('tasks')
           .update(payload)
           .eq('id', taskToEdit.id);
 
-        if (error) throw error;
+        if (taskError) throw taskError;
+
+        // B. Đồng bộ hóa Subtask quan hệ trong bảng subtasks
+        // 1. Quét danh sách các subtask hiện có trong DB của bản mẫu task_id này
+        const { data: dbSubtasks, error: fetchSubError } = await supabase
+          .from('subtasks')
+          .select('id, subtask_id')
+          .eq('task_id', taskToEdit.id);
+
+        if (fetchSubError) throw fetchSubError;
+
+        const dbSubs = dbSubtasks || [];
+
+        // 2. Phân loại subtask từ Form thành Update (Cũ) và Insert (Mới)
+        const subTasksToUpdate: any[] = [];
+        const subTasksToInsert: any[] = [];
+
+        subTasks.forEach((st: any) => {
+          const matchedDbSub = dbSubs.find(
+            (dbSub: any) => dbSub.subtask_id === st.id || dbSub.id === st.id
+          );
+
+          if (matchedDbSub) {
+            subTasksToUpdate.push({
+              id: matchedDbSub.id,
+              task_id: taskToEdit.id,
+              subtask_id: st.id,
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes,
+              actual_minutes: 0,
+              status: 'PENDING'
+            });
+          } else {
+            subTasksToInsert.push({
+              task_id: taskToEdit.id,
+              subtask_id: st.id,
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes,
+              actual_minutes: 0,
+              status: 'PENDING'
+            });
+          }
+        });
+
+        // 3. Tìm các subtasks đã bị Admin bấm xóa trên UI
+        const subTasksToDelete = dbSubs.filter((dbSub: any) => {
+          return !subTasks.some(
+            (st: any) => st.id === dbSub.subtask_id || st.id === dbSub.id
+          );
+        });
+
+        // 4. Thực thi các tác vụ xóa, cập nhật, và thêm mới subtasks
+        // Delete
+        if (subTasksToDelete.length > 0) {
+          const deleteIds = subTasksToDelete.map((d: any) => d.id);
+          const { error: deleteErr } = await supabase
+            .from('subtasks')
+            .delete()
+            .in('id', deleteIds);
+          if (deleteErr) throw deleteErr;
+        }
+
+        // Update
+        if (subTasksToUpdate.length > 0) {
+          const updatePromises = subTasksToUpdate.map((sub: any) => {
+            const { id, ...updateData } = sub;
+            return supabase
+              .from('subtasks')
+              .update(updateData)
+              .eq('id', id);
+          });
+          const updateResults = await Promise.all(updatePromises);
+          const firstErr = updateResults.find(r => r.error);
+          if (firstErr) throw firstErr.error;
+        }
+
+        // Insert
+        if (subTasksToInsert.length > 0) {
+          const { error: insertErr } = await supabase
+            .from('subtasks')
+            .insert(subTasksToInsert);
+          if (insertErr) throw insertErr;
+        }
+
         const displayId = taskToEdit.display_id ? String(taskToEdit.display_id).padStart(6, '0') : '';
         const idSuffix = displayId ? ` [${displayId}]` : '';
         await logger.log('UPDATE_TASK_TEMPLATE', `Updated task template${idSuffix}: ${taskName.trim()}`, { taskId: taskToEdit.id, payload });
       } else {
-        const { data, error } = await supabase
+        // A. Tạo mới Task bản mẫu
+        const { data, error: taskError } = await supabase
           .from('tasks')
           .insert([payload])
           .select('id, display_id')
           .single();
 
-        if (error) throw error;
-        const displayId = data && data.display_id ? String(data.display_id).padStart(6, '0') : '';
+        if (taskError) throw taskError;
+        if (!data) throw new Error('Failed to create task template record.');
+
+        const taskId = data.id;
+
+        // B. Lưu hàng loạt Subtasks bản mẫu cho Task mới
+        const subtasksToInsert = subTasks.map((st: any) => ({
+          task_id: taskId,
+          subtask_id: st.id,
+          content: st.content,
+          assignee: st.assignee,
+          estimated_minutes: st.estimated_minutes,
+          actual_minutes: 0,
+          status: 'PENDING'
+        }));
+
+        if (subtasksToInsert.length > 0) {
+          const { error: insertError } = await supabase
+            .from('subtasks')
+            .insert(subtasksToInsert);
+          if (insertError) throw insertError;
+        }
+
+        const displayId = data.display_id ? String(data.display_id).padStart(6, '0') : '';
         const idSuffix = displayId ? ` [${displayId}]` : '';
-        await logger.log('CREATE_TASK_TEMPLATE', `Created task template${idSuffix}: ${taskName.trim()}`, { taskId: data?.id, payload });
+        await logger.log('CREATE_TASK_TEMPLATE', `Created task template${idSuffix}: ${taskName.trim()}`, { taskId, payload });
       }
 
       toast.success(isEditMode ? 'Success updating template!' : 'Success creating template!');
@@ -850,7 +958,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               >
                 <option value="">-- Choose Project --</option>
                 {masterData.projects.map(proj => (
-                  <option key={proj} value={proj}>{proj}</option>
+                  <option key={proj.id} value={proj.name}>{proj.name}</option>
                 ))}
               </select>
             </div>
@@ -865,7 +973,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               >
                 <option value="">-- Choose Tag --</option>
                 {masterData.tags.map(tg => (
-                  <option key={tg} value={tg}>{tg}</option>
+                  <option key={tg.id} value={tg.name}>{tg.name}</option>
                 ))}
               </select>
             </div>

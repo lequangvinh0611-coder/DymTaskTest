@@ -26,20 +26,10 @@ interface SubTask {
 
 // Definition of metadata stored as robust JSON inside standard 'description' column
 interface TaskMetadata {
-  description: string;
   project_name: string;
   team_name: string;
   tag_name: string;
-  deadline_time: string;
-  deadline_days: string;
-  sub_tasks: SubTask[];
-  note?: string;
-  last_updated_by?: string;
-  last_updated_at?: string;
-  original_task_id?: string | null;
-  onetime_targets?: any[];
-  completions?: any;
-  versions?: any[];
+  note: string;
 }
 
 // Database schema representation
@@ -120,39 +110,20 @@ const formatDateTime = (isoString?: string): string => {
 // Helper to parse complex data out of standard 'description' column
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
-    description: '',
     project_name: '',
     team_name: '',
     tag_name: '',
-    deadline_time: '17:00',
-    deadline_days: 'Mon - Fri',
-    sub_tasks: [],
-    note: '',
-    last_updated_by: '',
-    last_updated_at: '',
-    onetime_targets: [],
-    completions: {},
-    versions: []
+    note: ''
   };
 
   if (!rawDescription) return defaultMeta;
 
   if (typeof rawDescription === 'object') {
     return {
-      description: rawDescription.description || '',
       project_name: rawDescription.project_name || '',
       team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
-      deadline_time: rawDescription.deadline_time || '17:00',
-      deadline_days: rawDescription.deadline_days || 'Mon - Fri',
-      sub_tasks: Array.isArray(rawDescription.sub_tasks) ? rawDescription.sub_tasks : [],
-      note: rawDescription.note || '',
-      last_updated_by: rawDescription.last_updated_by || '',
-      last_updated_at: rawDescription.last_updated_at || '',
-      original_task_id: rawDescription.original_task_id || null,
-      onetime_targets: Array.isArray(rawDescription.onetime_targets) ? rawDescription.onetime_targets : [],
-      completions: rawDescription.completions || {},
-      versions: rawDescription.versions || []
+      note: rawDescription.note || rawDescription.description || ''
     };
   }
 
@@ -162,30 +133,20 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
       try {
         const parsed = JSON.parse(trimmed);
         return {
-          description: parsed.description || '',
           project_name: parsed.project_name || '',
           team_name: parsed.team_name || '',
           tag_name: parsed.tag_name || '',
-          deadline_time: parsed.deadline_time || '17:00',
-          deadline_days: parsed.deadline_days || 'Mon - Fri',
-          sub_tasks: Array.isArray(parsed.sub_tasks) ? parsed.sub_tasks : [],
-          note: parsed.note || '',
-          last_updated_by: parsed.last_updated_by || '',
-          last_updated_at: parsed.last_updated_at || '',
-          original_task_id: parsed.original_task_id || null,
-          onetime_targets: Array.isArray(parsed.onetime_targets) ? parsed.onetime_targets : [],
-          completions: parsed.completions || {},
-          versions: parsed.versions || []
+          note: parsed.note || parsed.description || ''
         };
       } catch {
-        // JSON syntax error, parse as regular description
+        // Fallback
       }
     }
   }
 
   return {
     ...defaultMeta,
-    description: String(rawDescription)
+    note: String(rawDescription)
   };
 };
 
@@ -357,14 +318,21 @@ const TaskManager: React.FC = () => {
       return {
         ...task,
         meta,
-        project_name: meta.project_name,
-        team_name: meta.team_name,
-        tag_name: meta.tag_name,
-        deadline_time: meta.deadline_time,
-        deadline_days: meta.deadline_days,
-        sub_tasks: meta.sub_tasks,
-        last_updated_by: meta.last_updated_by || '',
-        last_updated_at: meta.last_updated_at || ''
+        project_name: task.projects?.name || meta.project_name || '',
+        team_name: task.teams?.name || meta.team_name || '',
+        tag_name: task.tags?.name || meta.tag_name || '',
+        deadline_time: task.deadline_time ? (task.deadline_time.slice(0, 5)) : '',
+        deadline_days: task.deadline_days || '',
+        sub_tasks: (task.subtasks && task.subtasks.length > 0)
+          ? task.subtasks.map((st: any) => ({
+              id: st.subtask_id || st.id,
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes
+            }))
+          : [],
+        last_updated_by: '',
+        last_updated_at: ''
       };
     });
   }, [tasks]);
@@ -610,7 +578,7 @@ const TaskManager: React.FC = () => {
   const [quickApprovingId, setQuickApprovingId] = useState<string | null>(null);
 
   const handleQuickApprove = (task: DbTask) => {
-    const meta = parseTaskDescription(task.description);
+    const meta = parseTaskDescription(task.description) as any;
     // Update last updated info
     meta.last_updated_by = profile?.name || 'Unknown';
     meta.last_updated_at = new Date().toISOString();
@@ -634,7 +602,7 @@ const TaskManager: React.FC = () => {
   };
 
   const handleOpenApproveEditModal = (task: DbTask) => {
-    const meta = parseTaskDescription(task.description);
+    const meta = parseTaskDescription(task.description) as any;
     // Update last updated info
     meta.last_updated_by = profile?.name || 'Unknown';
     meta.last_updated_at = new Date().toISOString();
@@ -688,8 +656,8 @@ const TaskManager: React.FC = () => {
         const subContent = subtasks.map((s: any) => s.content || '').filter(Boolean).join(', ');
         const subAssignees = subtasks.map((s: any) => s.assignee || '').filter(Boolean).filter((val: string, i: number, arr: string[]) => arr.indexOf(val) === i).join(', ');
 
-        const updatedUser = task.meta?.last_updated_by || 'Unknown';
-        const updatedTime = task.meta?.last_updated_at ? formatDateTime(task.meta.last_updated_at) : formatDateTime(task.created_at || task.updated_at);
+        const updatedUser = (task as any).last_updated_by || 'Unknown';
+        const updatedTime = formatDateTime(task.created_at || task.updated_at);
 
         return [
           `"\t${getDisplayId(task)}"`,
@@ -1238,15 +1206,15 @@ const TaskManager: React.FC = () => {
               <div className="grid grid-cols-2 gap-3 bg-slate-50 rounded-lg p-3 text-xs">
                 <div className="space-y-0.5">
                   <span className="text-slate-400 font-medium block">Project</span>
-                  <span className="text-slate-700 block text-xs font-semibold hover:text-indigo-600 cursor-pointer transition-colors truncate">{drawerParsedMeta.project_name}</span>
+                  <span className="text-slate-700 block text-xs font-semibold hover:text-indigo-600 cursor-pointer transition-colors truncate">{(openedDrawerTask as any).project_name || drawerParsedMeta.project_name}</span>
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-slate-400 font-medium block">Tag</span>
-                  <span className="text-slate-700 block text-xs truncate">{drawerParsedMeta.tag_name}</span>
+                  <span className="text-slate-700 block text-xs truncate">{(openedDrawerTask as any).tag_name || drawerParsedMeta.tag_name}</span>
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-slate-400 font-medium block">Team</span>
-                  <span className="text-slate-700 block text-xs truncate">{getTaskTeams(openedDrawerTask.sub_tasks, drawerParsedMeta.team_name).display}</span>
+                  <span className="text-slate-700 block text-xs truncate">{getTaskTeams(openedDrawerTask.sub_tasks, (openedDrawerTask as any).team_name || drawerParsedMeta.team_name).display}</span>
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-slate-400 font-medium block">Frequency mode</span>
@@ -1299,8 +1267,8 @@ const TaskManager: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  {drawerParsedMeta.sub_tasks && drawerParsedMeta.sub_tasks.length > 0 ? (
-                    drawerParsedMeta.sub_tasks.map((sub, index) => (
+                  {openedDrawerTask.sub_tasks && openedDrawerTask.sub_tasks.length > 0 ? (
+                    openedDrawerTask.sub_tasks.map((sub, index) => (
                       <div 
                         key={sub.id || index} 
                         className="border border-slate-100 hover:border-blue-100 hover:bg-blue-50/10 transition-all rounded-lg p-3 bg-white flex flex-col justify-between gap-2 relative shadow-xs animate-in fade-in"

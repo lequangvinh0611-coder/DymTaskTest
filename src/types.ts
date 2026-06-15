@@ -29,27 +29,50 @@ export interface Tag {
   color?: string;
 }
 
+export interface TaskLog {
+  id: string;
+  task_id: string;
+  todo_date: string; // YYYY-MM-DD
+  status: 'NEW' | 'IN_PROGRESS' | 'DONE' | 'SUBMITTED' | 'SKIPPED';
+}
+
+export interface SubtaskLog {
+  id: string;
+  subtask_id: string;
+  task_id: string;
+  todo_date: string; // YYYY-MM-DD
+  is_completed: boolean;
+  status?: string;
+  completed_by?: string;
+}
+
 export interface Subtask {
   id: string;
-  name: string;
+  task_id?: string;
+  name?: string;                     // Giữ name? cho tương thích ngược với UI
+  content: string;                    // Cột mới template con subtasks
   assignee: string;
-  estimated_minutes: number;
-  actual_minutes?: number; // Thêm actual_minutes
+  estimated_minutes?: number;
+  actual_minutes?: number;            // Thêm actual_minutes
   status?: 'NEW' | 'IN_PROGRESS' | 'DONE'; // Thêm status thay vì chỉ is_completed
-  is_completed: boolean;
+  is_completed?: boolean;
+  subtask_logs?: SubtaskLog[];        // Chứa dữ liệu nhật ký subtask ngày
 }
 
 export interface Task {
   id: string;
-  task_name: string;
+  task_name: string;                  // Giữ nguyên cho tương thích ngược
+  title?: string;                    // Cột mới ở bảng tasks mới
+  description?: string | null;       // Cột mới (chỉ còn note/mô tả thuần)
   tag_id: string;
   project_id: string;
   team_id: string;
-  type: 'DAILY' | 'WEEKLY' | 'ONCE';
+  type: 'DAILY' | 'WEEKLY' | 'ONCE' | 'MONTHLY' | 'ONETIME'; // Kiểu cũ/mới của task
+  task_type?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ONETIME'; // Trường mới
   
   // Các field thời gian mới theo Phase 2 (Migration 1)
   deadline_time?: string | null;     // VD: "08:30" hoặc "17:00:00"
-  deadline_days?: string[] | null;   // VD: ["Mon", "Tue"]
+  deadline_days?: string | null;     // Cột độc lập chứa ngày lặp lại dưới dạng TEXT
   estimated_minutes: number;         // Chuyển sang lưu số phút
   actual_minutes: number;            // Chuyển sang lưu số phút
 
@@ -63,6 +86,15 @@ export interface Task {
   projects?: { name: string };
   teams?: { name: string };
   tags?: { name: string; color?: string };
+
+  task_logs?: TaskLog[];             // Chứa dữ liệu nhật ký task ngày (Resource Embedding)
+}
+
+export interface TaskMetadata {
+  project_name: string;
+  team_name: string;
+  tag_name: string;
+  note: string;
 }
 
 export interface AuditLog {
@@ -112,9 +144,15 @@ export interface AppState {
   approveTasksLoaded: boolean;
   approveTasksLoading: boolean;
 
+  // State mới cho bước refactor RDBMS
+  dailyTasks: any[];
+  dailyTasksLoaded: boolean;
+  dailyTasksLoading: boolean;
+
   fetchMetadata: (force?: boolean) => Promise<void>;
   fetchTasks: (force?: boolean) => Promise<void>;
   fetchApproveTasks: (force?: boolean) => Promise<void>;
+  fetchDailyTasks: (dateString: string) => Promise<void>;
   setTasks: (tasks: any[] | ((prev: any[]) => any[])) => void;
 }
 
@@ -168,6 +206,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   approveTasks: [],
   approveTasksLoaded: false,
   approveTasksLoading: false,
+
+  // State mới cho bước refactor RDBMS
+  dailyTasks: [],
+  dailyTasksLoaded: false,
+  dailyTasksLoading: false,
 
   fetchMetadata: async (force = false) => {
     if (get().metadataLoading) return;
@@ -224,7 +267,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const { data, error } = await supabase
         .from('tasks')
-        .select('*')
+        .select(`
+          *,
+          projects(name),
+          teams(name),
+          tags(name, color),
+          subtasks(*)
+        `)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -258,6 +307,66 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err) {
       console.error('Error fetching global approve tasks:', err);
       set({ approveTasksLoading: false });
+    }
+  },
+
+  fetchDailyTasks: async (dateString: string) => {
+    if (get().dailyTasksLoading) return;
+    set({ dailyTasksLoading: true });
+    try {
+      // 1. Fetch all template tasks and nested subtasks
+      const { data: tasksData, error: tasksError } = await supabase
+        .from('tasks')
+        .select(`
+          *,
+          projects(name),
+          teams(name),
+          tags(name, color),
+          subtasks(*)
+        `)
+        .eq('is_active', true);
+
+      if (tasksError) throw tasksError;
+
+      // 2. Fetch daily logs for the target date
+      const [taskLogsRes, subtaskLogsRes] = await Promise.all([
+        supabase.from('task_logs').select('*').eq('todo_date', dateString),
+        supabase.from('subtask_logs').select('*').eq('todo_date', dateString)
+      ]);
+
+      const taskLogsData = taskLogsRes.data || [];
+      const subtaskLogsData = subtaskLogsRes.data || [];
+
+      // 3. Assemble and virtualize on the frontend
+      const processed = (tasksData || []).map((task: any) => {
+        const taskLogs = taskLogsData.filter((log: any) => log.task_id === task.id);
+        
+        const subtasksWithLogs = (task.subtasks || []).map((subtask: any) => {
+          const matchedSubtaskLogs = subtaskLogsData.filter((log: any) => log.subtask_id === subtask.id);
+          return {
+            ...subtask,
+            name: subtask.name || subtask.content, // Backward compatibility with UI name property
+            subtask_logs: matchedSubtaskLogs
+          };
+        });
+
+        return {
+          ...task,
+          task_name: task.task_name || task.title, // Backward compatibility with task_name property
+          type: task.type || task.task_type, // Map task_type to legacy type
+          subtasks: subtasksWithLogs,
+          task_logs: taskLogs
+        };
+      });
+
+      set({
+        dailyTasks: processed,
+        dailyTasksLoaded: true,
+        dailyTasksLoading: false
+      });
+    } catch (err) {
+      console.error('Error fetching daily tasks:', err);
+      set({ dailyTasksLoading: false });
     }
   },
 

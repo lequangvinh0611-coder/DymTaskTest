@@ -197,7 +197,7 @@ const ApproveTask: React.FC = () => {
   const selectedTeams = useMemo(() => {
     return filterTeam ? filterTeam.split(',').filter(Boolean) : [];
   }, [filterTeam]);
-  const [filterStatus, setFilterStatus] = useState(''); // Default to all statuses (Status)
+  const [filterStatus, setFilterStatus] = useState('PENDING'); // Mặc định chỉ hiển thị Yêu cầu Chờ duyệt (PENDING)
   const [filterProject, setFilterProject] = useState('');
   const [filterTag, setFilterTag] = useState('');
   const [filterTaskType, setFilterTaskType] = useState('');
@@ -289,7 +289,7 @@ const ApproveTask: React.FC = () => {
       searchQuery === '' &&
       filterAssignee === defaultAssignee &&
       filterTeam === defaultTeam &&
-      filterStatus === '' &&
+      filterStatus === 'PENDING' &&
       filterProject === '' &&
       filterTag === '' &&
       filterTaskType === ''
@@ -396,6 +396,57 @@ const ApproveTask: React.FC = () => {
           let mergedCompletions = request.meta.completions || {};
           let mergedOnetimeTargets = request.meta.onetime_targets || [];
           let updatedVersions = request.meta.versions || [];
+
+          // 1. Fetch Master Data safely to map names back to UUIDs
+          const [projRes, teamRes, tagRes] = await Promise.all([
+            supabase.from('projects').select('id, name'),
+            supabase.from('teams').select('id, name'),
+            supabase.from('tags').select('id, name')
+          ]);
+          const projectsDb = projRes.data || [];
+          const teamsDb = teamRes.data || [];
+          const tagsDb = tagRes.data || [];
+
+          const selectedProjectObj = projectsDb.find(p => p.name === request.meta.project_name);
+          const selectedTeamObj = teamsDb.find(t => t.name === request.meta.team_name);
+          const selectedTagObj = tagsDb.find(t => t.name === request.meta.tag_name);
+
+          // 2. Parse deadline days arrays
+          let deadlineDaysArray: string[] = [];
+          if (typeof request.meta.deadline_days === 'string') {
+            if (request.task_type === 'DAILY') {
+              deadlineDaysArray = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+            } else if (request.task_type === 'WEEKLY') {
+              deadlineDaysArray = request.meta.deadline_days.split(',').map((d: string) => d.trim()).filter(Boolean);
+            } else if (request.task_type === 'MONTHLY') {
+              deadlineDaysArray = request.meta.deadline_days.split(/[\s,]+/).map((d: string) => d.trim()).filter(Boolean);
+            } else {
+              deadlineDaysArray = request.meta.deadline_days.split(',').map((d: string) => d.trim()).filter(Boolean);
+            }
+          } else if (Array.isArray(request.meta.deadline_days)) {
+            deadlineDaysArray = request.meta.deadline_days;
+          }
+
+          // 3. Parse and normalize deadline time (24-hour style hh:mm:ss)
+          const deadlineTimeRaw = request.meta.deadline_time || '';
+          let finalDeadlineTime = null;
+          if (deadlineTimeRaw) {
+            if (deadlineTimeRaw.toUpperCase().includes('AM') || deadlineTimeRaw.toUpperCase().includes('PM')) {
+              const parts = deadlineTimeRaw.match(/(\d+):(\d+)\s*(AM|PM)/i);
+              if (parts) {
+                let hour = parseInt(parts[1], 10);
+                const minute = parts[2];
+                const ampm = parts[3].toUpperCase();
+                if (ampm === 'PM' && hour < 12) hour += 12;
+                if (ampm === 'AM' && hour === 12) hour = 0;
+                finalDeadlineTime = `${String(hour).padStart(2, '0')}:${minute}:00`;
+              } else {
+                finalDeadlineTime = deadlineTimeRaw;
+              }
+            } else {
+              finalDeadlineTime = deadlineTimeRaw.includes(':') && deadlineTimeRaw.split(':').length === 2 ? `${deadlineTimeRaw}:00` : deadlineTimeRaw;
+            }
+          }
 
           if (isEditRequest) {
             // 1. Fetch the LATEST state of the original task to prevent race conditions & overwriting newer completions
@@ -506,25 +557,6 @@ const ApproveTask: React.FC = () => {
             }
           }
 
-          // Serialize accurate description matching standard structures
-          const formattedDescription = JSON.stringify({
-            description: request.meta.description || '',
-            project_name: request.meta.project_name || '',
-            team_name: request.meta.team_name || '',
-            tag_name: request.meta.tag_name || '',
-            deadline_time: request.meta.deadline_time || '09:00 AM',
-            deadline_days: request.meta.deadline_days || 'Mon - Fri',
-            sub_tasks: request.meta.sub_tasks || [],
-            note: request.meta.note || '',
-            last_updated_by: profile?.name || 'System Auto Approved',
-            last_updated_at: new Date().toISOString(),
-            todo_date: request.meta.todo_date,
-            todo_status: request.meta.todo_status,
-            completions: mergedCompletions,
-            versions: updatedVersions,
-            onetime_targets: mergedOnetimeTargets
-          });
-
           const calculated_request_est_time = (request.meta.sub_tasks || []).reduce(
             (sum: number, s: any) => sum + (Number(s.estimated_minutes) || 0), 
             0
@@ -537,13 +569,112 @@ const ApproveTask: React.FC = () => {
               .from('tasks')
               .update({
                 title: request.title,
-                description: formattedDescription,
+                task_name: request.title,
+                description: request.meta.note || '', // Cột description chỉ lưu text ghi chú thuần túy
                 task_type: request.task_type,
+                type: request.task_type,
                 est_time: final_est_time,
+                project_id: selectedProjectObj?.id || null,
+                team_id: selectedTeamObj?.id || null,
+                team_ids: selectedTeamObj?.id ? [selectedTeamObj.id] : [],
+                tag_id: selectedTagObj?.id || null,
+                deadline_time: finalDeadlineTime,
+                deadline_days: deadlineDaysArray
               })
               .eq('id', request.meta.original_task_id);
 
             if (updateError) throw updateError;
+
+            // --- THUẬT TOÁN ĐỒNG BỘ DELTA CHO SUBTASKS (SUBTASK DELTA SYNC) ---
+            // Tránh xóa trắng subtask cũ của task template, tiến hành so sánh theo ID
+            const { data: dbSubtasks, error: fetchSubError } = await supabase
+              .from('subtasks')
+              .select('id, subtask_id')
+              .eq('task_id', request.meta.original_task_id);
+
+            if (fetchSubError) throw fetchSubError;
+
+            const dbSubsArray = dbSubtasks || [];
+            const draftSubtasks = request.meta.sub_tasks || [];
+
+            const subtasksToUpdate: any[] = [];
+            const subtasksToInsert: any[] = [];
+            const subtasksToDelete: any[] = [];
+
+            // Tạo map tìm kiếm nhanh subtask trong Database theo cả id và subtask_id
+            const dbSubtaskMap = new Map();
+            dbSubsArray.forEach((dbSub: any) => {
+              dbSubtaskMap.set(dbSub.subtask_id, dbSub);
+              dbSubtaskMap.set(dbSub.id, dbSub);
+            });
+
+            const seenDbIds = new Set<string>();
+
+            // Phân loại UPDATE và INSERT
+            draftSubtasks.forEach((st: any) => {
+              const matchedDbSub = dbSubtaskMap.get(st.id);
+
+              if (matchedDbSub) {
+                // Nhóm UPDATE: Có ID trùng khớp, tiến hành cập nhật content, assignee, estimated_minutes
+                subtasksToUpdate.push({
+                  id: matchedDbSub.id,
+                  content: st.content,
+                  assignee: st.assignee,
+                  estimated_minutes: Number(st.estimated_minutes) || 0
+                });
+                seenDbIds.add(matchedDbSub.id);
+              } else {
+                // Nhóm INSERT: Không thấy ID khớp, chèn mới subtask bản ghi kèm theo task_id 
+                subtasksToInsert.push({
+                  task_id: request.meta.original_task_id,
+                  subtask_id: st.id || Math.random().toString(36).substring(2, 9),
+                  content: st.content,
+                  assignee: st.assignee,
+                  estimated_minutes: Number(st.estimated_minutes) || 0,
+                  actual_minutes: 0,
+                  status: 'PENDING'
+                });
+              }
+            });
+
+            // Phân loại DELETE: Những subtask cũ trong Database nay không còn xuất hiện trong nháp phê duyệt
+            dbSubsArray.forEach((dbSub: any) => {
+              if (!seenDbIds.has(dbSub.id)) {
+                if (!subtasksToDelete.find(d => d.id === dbSub.id)) {
+                  subtasksToDelete.push(dbSub);
+                }
+              }
+            });
+
+            // Thực thi chênh lệch Delta trên Supabase
+            if (subtasksToDelete.length > 0) {
+              const deleteIds = subtasksToDelete.map(d => d.id);
+              const { error: delErr } = await supabase
+                .from('subtasks')
+                .delete()
+                .in('id', deleteIds);
+              if (delErr) throw delErr;
+            }
+
+            if (subtasksToUpdate.length > 0) {
+              const updatePromises = subtasksToUpdate.map(sub => {
+                const { id, ...updateData } = sub;
+                return supabase
+                  .from('subtasks')
+                  .update(updateData)
+                  .eq('id', id);
+              });
+              const updateResults = await Promise.all(updatePromises);
+              const firstErr = updateResults.find(r => r.error);
+              if (firstErr) throw firstErr.error;
+            }
+
+            if (subtasksToInsert.length > 0) {
+              const { error: insErr } = await supabase
+                .from('subtasks')
+                .insert(subtasksToInsert);
+              if (insErr) throw insErr;
+            }
 
             await logger.log(
               'APPROVE_TASK_ACCEPTED', 
@@ -554,19 +685,51 @@ const ApproveTask: React.FC = () => {
             toast.success(`Request accepted! Changes applied to task template "${request.title}".`);
           } else {
             // Insert into standard tasks list
-            const { error: insertError } = await supabase
+            const { data: newTasks, error: insertError } = await supabase
               .from('tasks')
               .insert([{
                 title: request.title,
-                description: formattedDescription,
+                task_name: request.title,
+                description: request.meta.note || '', // Cột description chỉ lưu text ghi chú thuần túy
                 task_type: request.task_type,
+                type: request.task_type,
                 status: 'ON',
                 is_active: true,
                 est_time: final_est_time,
-                actual_time: 0
-              }]);
+                actual_time: 0,
+                project_id: selectedProjectObj?.id || null,
+                team_id: selectedTeamObj?.id || null,
+                team_ids: selectedTeamObj?.id ? [selectedTeamObj.id] : [],
+                tag_id: selectedTagObj?.id || null,
+                deadline_time: finalDeadlineTime,
+                deadline_days: deadlineDaysArray
+              }])
+              .select();
 
             if (insertError) throw insertError;
+            if (!newTasks || newTasks.length === 0) {
+              throw new Error("Could not retrieve newly created task ID.");
+            }
+
+            const newTaskId = newTasks[0].id;
+
+            // Chèn toàn bộ các subtasks đi kèm vào bảng subtasks
+            const subtasksToInsert = (request.meta.sub_tasks || []).map((st: any) => ({
+              task_id: newTaskId,
+              subtask_id: st.id || Math.random().toString(36).substring(2, 9),
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: Number(st.estimated_minutes) || 0,
+              actual_minutes: 0,
+              status: 'PENDING'
+            }));
+
+            if (subtasksToInsert.length > 0) {
+              const { error: insertSubError } = await supabase
+                .from('subtasks')
+                .insert(subtasksToInsert);
+              if (insertSubError) throw insertSubError;
+            }
 
             await logger.log(
               'APPROVE_TASK_ACCEPTED', 
@@ -577,13 +740,13 @@ const ApproveTask: React.FC = () => {
             toast.success(`Request accepted! Task template "${request.title}" is now live in Task Manager.`);
           }
 
-          // Delete approved request from approve_tasks
-          const { error: deleteError } = await supabase
+          // Cập nhật trạng thái bản ghi trong bảng approve_tasks thành 'APPROVED' thay vì xóa hẳn
+          const { error: updateRequestError } = await supabase
             .from('approve_tasks')
-            .delete()
+            .update({ status: 'APPROVED' })
             .eq('id', request.id);
 
-          if (deleteError) throw deleteError;
+          if (updateRequestError) throw updateRequestError;
 
           setOpenedDrawerTask(null);
           // Reload global tasks and approve requests list synchronously
@@ -686,7 +849,7 @@ const ApproveTask: React.FC = () => {
       ? profile.team_ids.join(',')
       : (profile?.team_ids?.[0] || '');
     setFilterTeam(defaultTeamVal);
-    setFilterStatus('');
+    setFilterStatus('PENDING');
     setFilterProject('');
     setFilterTag('');
     setFilterTaskType('');
@@ -1050,6 +1213,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
           <FilterSelect
             options={[
               { value: 'PENDING', label: 'Pending' },
+              { value: 'APPROVED', label: 'Approved' },
               { value: 'REJECTED', label: 'Rejected' },
             ]}
             value={filterStatus}
@@ -1212,7 +1376,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                     <span className={`inline-block border px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide ${
                       task.status === 'PENDING' 
                         ? 'bg-amber-50 border-amber-200 text-amber-600'
-                        : 'bg-red-50 border-red-200 text-red-600'
+                        : task.status === 'APPROVED'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                          : 'bg-red-50 border-red-200 text-red-600'
                     }`}>
                       {task.status || 'PENDING'}
                     </span>
@@ -1231,7 +1397,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                       <div className="absolute right-3 top-8 bg-white border border-slate-200 rounded-md shadow-lg py-1 z-[100] w-[150px] text-left">
                         
                         {/* Admin / Master actions (Accept / Reject) */}
-                        {!isUser && (
+                        {!isUser && task.status === 'PENDING' && (
                           <>
                             <button
                               onClick={(e) => handleAcceptRequest(task, e)}
@@ -1371,10 +1537,12 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                   </h2>
                 </div>
                 <div className="inline-flex items-center gap-1.5">
-                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                     openedDrawerTask.status === 'PENDING'
-                      ? 'bg-amber-50 border border-amber-200 text-amber-600'
-                      : 'bg-red-50 border border-red-200 text-red-600'
+                      ? 'bg-amber-50 border-amber-200 text-amber-600'
+                      : openedDrawerTask.status === 'APPROVED'
+                        ? 'bg-emerald-50 border-emerald-250 text-emerald-600'
+                        : 'bg-red-50 border-red-200 text-red-600'
                   }`}>
                     {openedDrawerTask.status}
                   </span>
@@ -1580,7 +1748,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
 
             {/* Accept / Reject actions block */}
             <div className="p-4 border-t border-slate-100 bg-slate-50 shrink-0 space-y-2">
-              {!isUser && (
+              {!isUser && openedDrawerTask.status === 'PENDING' && (
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={(e) => handleAcceptRequest(openedDrawerTask, e)}

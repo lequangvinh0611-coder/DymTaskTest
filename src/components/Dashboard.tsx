@@ -494,6 +494,22 @@ export default function Dashboard() {
 
     tasks.forEach(task => {
       const meta = parseDescriptionMeta(task.description);
+      // Backwards-compatible override using direct database properties
+      meta.project_name = task.projects?.name || meta.project_name;
+      meta.team_name = task.teams?.name || meta.team_name;
+      meta.tag_name = task.tags?.name || meta.tag_name;
+      meta.deadline_days = task.deadline_days || meta.deadline_days;
+      meta.deadline_time = task.deadline_time ? task.deadline_time.slice(0, 5) : meta.deadline_time;
+      if (task.subtasks && task.subtasks.length > 0) {
+        meta.sub_tasks = task.subtasks.map((st: any) => ({
+          id: st.subtask_id || st.id,
+          content: st.content,
+          name: st.content,
+          assignee: st.assignee,
+          estimated_minutes: st.estimated_minutes
+        }));
+      }
+
       const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY'].includes((task.task_type || '').toUpperCase());
 
       // Correct meta based todo_status and date for OneTime
