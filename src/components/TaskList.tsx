@@ -492,7 +492,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
   // Initial tasks loader fetching active records using global app state
   const loadActiveTasks = async () => {
-    await fetchDailyTasks(startDate);
+    await fetchDailyTasks(startDate, endDate);
   };
 
   // Build a map of usernames to their team names
@@ -517,16 +517,16 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
   useEffect(() => {
     // Run background cache updates silently
-    fetchDailyTasks(startDate);
+    fetchDailyTasks(startDate, endDate);
     fetchMetadata();
-  }, [startDate]);
+  }, [startDate, endDate]);
 
   // Generate frontend trackable virtual tasks for DAILY, WEEKLY, MONTHLY, and ONETIME types within startDate & endDate
   const virtualTasks = useMemo(() => {
     const list: VirtualTask[] = [];
 
     dailyTasks.forEach(task => {
-      const type = (task.task_type || task.type || '').toUpperCase();
+      const type = (task.task_type || 'DAILY').toUpperCase();
       const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY'].includes(type);
 
       const createdAtStr = task.created_at;
@@ -580,19 +580,25 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           });
 
           // Sum calculations for parent est_time and actual_time
-          const est_time = sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
-          const actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
+          const calc_est_time = sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+          const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
+
+          const meta = parseTaskDescription(task.description);
+          const project_name = task.projects?.name || meta.project_name || task.project_name || '';
+          const team_name = meta.team_name || task.team_name || '';
+          const tag_name = task.tags?.name || meta.tag_name || task.tag_name || '';
 
           list.push({
             ...task,
-            title: task.title || task.task_name,
-            project_name: task.projects?.name || task.project_name || '',
-            team_name: task.teams?.name || task.team_name || '',
-            tag_name: task.tags?.name || task.tag_name || '',
+            title: task.title || '',
+            task_type: type,
+            project_name,
+            team_name,
+            tag_name,
             deadline_time: task.deadline_time || '17:00',
             deadline_days: deadlineDaysStr,
-            est_time,
-            actual_time,
+            est_time: calc_est_time,
+            actual_time: calc_actual_time,
             virtual_id: `${task.id}_${occ.completion_key}`,
             todo_date: occ.todo_date,
             todo_status,
@@ -639,19 +645,25 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               };
             });
 
-            const est_time = sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
-            const actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
+            const calc_est_time = sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+            const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
+
+            const meta = parseTaskDescription(task.description);
+            const project_name = task.projects?.name || meta.project_name || task.project_name || '';
+            const team_name = meta.team_name || task.team_name || '';
+            const tag_name = task.tags?.name || meta.tag_name || task.tag_name || '';
 
             list.push({
               ...task,
-              title: task.title || task.task_name,
-              project_name: task.projects?.name || task.project_name || '',
-              team_name: task.teams?.name || task.team_name || '',
-              tag_name: task.tags?.name || task.tag_name || '',
+              title: task.title || '',
+              task_type: type,
+              project_name,
+              team_name,
+              tag_name,
               deadline_time: task.deadline_time || '17:00',
               deadline_days: deadlineDaysStr,
-              est_time,
-              actual_time,
+              est_time: calc_est_time,
+              actual_time: calc_actual_time,
               virtual_id: `${task.id}_${todo_date}`,
               todo_date,
               todo_status,
@@ -897,7 +909,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             todo_date: task.todo_date,
             status: 'DONE',
             is_completed: true,
-            completed_by: updaterName
+            completed_by: updaterName,
+            team_name: sub.team_name || ''
           }, {
             onConflict: 'subtask_id,todo_date'
           });
@@ -1056,7 +1069,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             todo_date: task.todo_date,
             status: 'SKIPPED',
             is_completed: false,
-            completed_by: updaterName
+            completed_by: updaterName,
+            team_name: sub.team_name || ''
           }, {
             onConflict: 'subtask_id,todo_date'
           });
@@ -1184,7 +1198,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             todo_date: taskToSave.todo_date,
             status: statusUpper,
             is_completed: isCompleted,
-            completed_by: completedBy
+            completed_by: completedBy,
+            team_name: sub.team_name || ''
           }, {
             onConflict: 'subtask_id,todo_date'
           });
@@ -1510,7 +1525,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             todo_date: taskObj.todo_date,
             status: 'SKIPPED',
             is_completed: false,
-            completed_by: updaterName
+            completed_by: updaterName,
+            team_name: sub.team_name || ''
           });
         });
 
@@ -1637,7 +1653,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             todo_date: taskObj.todo_date,
             status: 'DONE',
             is_completed: true,
-            completed_by: updaterName
+            completed_by: updaterName,
+            team_name: sub.team_name || ''
           });
         });
 

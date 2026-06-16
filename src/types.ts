@@ -9,7 +9,6 @@ export interface User {
   email: string;
   role: UserRole;
   status: 'ACTIVE' | 'INACTIVE';
-  // Đã xóa string[] teams cũ, thay bằng quan hệ từ bảng user_teams
   user_teams?: { team_id: string }[];
 }
 
@@ -44,6 +43,7 @@ export interface SubtaskLog {
   is_completed: boolean;
   status?: string;
   completed_by?: string;
+  team_name?: string; // Cột lưu trữ thông tin Team
 }
 
 export interface Subtask {
@@ -57,6 +57,7 @@ export interface Subtask {
   status?: 'NEW' | 'IN_PROGRESS' | 'DONE'; // Thêm status thay vì chỉ is_completed
   is_completed?: boolean;
   subtask_logs?: SubtaskLog[];        // Chứa dữ liệu nhật ký subtask ngày
+  team_name?: string;                 // Cột lưu trữ thông tin Team trực tiếp
 }
 
 export interface Task {
@@ -64,9 +65,8 @@ export interface Task {
   task_name: string;                  // Giữ nguyên cho tương thích ngược
   title?: string;                    // Cột mới ở bảng tasks mới
   description?: string | null;       // Cột mới (chỉ còn note/mô tả thuần)
-  tag_id: string;
-  project_id: string;
-  team_id: string;
+  project_name?: string;             // Cột TEXT mới thay thế project_id relation
+  tag_name?: string;                 // Cột TEXT mới thay thế tag_id relation
   type: 'DAILY' | 'WEEKLY' | 'ONCE' | 'MONTHLY' | 'ONETIME'; // Kiểu cũ/mới của task
   task_type?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ONETIME'; // Trường mới
   
@@ -78,14 +78,8 @@ export interface Task {
 
   status: 'NEW' | 'IN_PROGRESS' | 'DONE' | 'SUBMITTED';
   subtasks: Subtask[];
-  assignees: string[]; // Mảng email
   created_at: string;
   updated_at?: string;
-
-  // Thuộc tính quan hệ (sinh ra khi gọi Supabase select đi kèm bảng khác)
-  projects?: { name: string };
-  teams?: { name: string };
-  tags?: { name: string; color?: string };
 
   task_logs?: TaskLog[];             // Chứa dữ liệu nhật ký task ngày (Resource Embedding)
 }
@@ -152,9 +146,52 @@ export interface AppState {
   fetchMetadata: (force?: boolean) => Promise<void>;
   fetchTasks: (force?: boolean) => Promise<void>;
   fetchApproveTasks: (force?: boolean) => Promise<void>;
-  fetchDailyTasks: (dateString: string) => Promise<void>;
+  fetchDailyTasks: (startDateString: string, endDateString?: string) => Promise<void>;
   setTasks: (tasks: any[] | ((prev: any[]) => any[])) => void;
 }
+
+// Helper to parse description
+const parseTaskDescriptionLocal = (rawDescription: any) => {
+  const defaultMeta = {
+    project_name: '',
+    team_name: '',
+    tag_name: '',
+    note: ''
+  };
+
+  if (!rawDescription) return defaultMeta;
+
+  if (typeof rawDescription === 'object') {
+    return {
+      project_name: rawDescription.project_name || '',
+      team_name: rawDescription.team_name || '',
+      tag_name: rawDescription.tag_name || '',
+      note: rawDescription.note || rawDescription.description || ''
+    };
+  }
+
+  if (typeof rawDescription === 'string') {
+    const trimmed = rawDescription.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return {
+          project_name: parsed.project_name || '',
+          team_name: parsed.team_name || '',
+          tag_name: parsed.tag_name || '',
+          note: parsed.note || parsed.description || ''
+        };
+      } catch {
+        // Fallback
+      }
+    }
+  }
+
+  return {
+    ...defaultMeta,
+    note: String(rawDescription)
+  };
+};
 
 // Store quản lý UI và cache dữ liệu toàn cục để tối ưu hóa UI/UX
 export const useAppStore = create<AppState>((set, get) => ({
@@ -269,16 +306,111 @@ export const useAppStore = create<AppState>((set, get) => ({
         .from('tasks')
         .select(`
           *,
-          projects(name),
-          teams(name),
-          tags(name, color),
-          subtasks(*)
+          subtasks(*),
+          task_logs(*),
+          subtask_logs(*)
         `)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+
+      // Hydrate backward-compatible completions object on descriptions in-memory
+      const processed = (data || []).map((tRaw: any) => {
+        // Enforce unique subtasks by database primary key id to prevent double subtasks
+        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) =>
+          self.findIndex((s: any) => s.id === sub.id) === index
+        );
+        const task = { ...tRaw, subtasks: uniqueSubs };
+        
+        // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
+        const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
+        const meta = {
+          project_name: task.project_name || '',
+          team_name: firstTeamName,
+          tag_name: task.tag_name || '',
+          note: (task.description && !task.description.startsWith('{')) ? task.description : ''
+        };
+        const completions: Record<string, any> = {};
+
+        // Collect all unique dates from task_logs and subtask_logs
+        const uniqueDates = Array.from(new Set([
+          ...(task.task_logs || []).map((l: any) => l.todo_date),
+          ...(task.subtask_logs || []).map((l: any) => l.todo_date)
+        ]));
+
+        uniqueDates.forEach((todoDate: string) => {
+          const tLog = (task.task_logs || []).find((l: any) => l.todo_date === todoDate);
+          
+          let todo_status: 'NEW' | 'DONE' | 'SKIPPED' = 'NEW';
+          if (tLog) {
+            const normalizedStatus = (tLog.status || '').toUpperCase();
+            if (normalizedStatus === 'DONE' || normalizedStatus === 'SUBMITTED') {
+              todo_status = 'DONE';
+            } else if (normalizedStatus === 'SKIPPED') {
+              todo_status = 'SKIPPED';
+            }
+          }
+
+          // Map active subtasks completion details for this date
+          const sub_tasks = (task.subtasks || []).map((st: any) => {
+            const stLog = (task.subtask_logs || []).find(
+              (sl: any) => sl.subtask_id === st.id && sl.todo_date === todoDate
+            );
+            let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
+            if (stLog) {
+              const sUpper = (stLog.status || '').toUpperCase();
+              if (sUpper === 'DONE' || sUpper === 'SUBMITTED' || stLog.is_completed) {
+                sub_status = 'Done';
+              } else if (sUpper === 'SKIPPED') {
+                sub_status = 'Skipped';
+              }
+            }
+            return {
+              id: st.id,
+              content: st.content,
+              name: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes,
+              actual_minutes: stLog ? (stLog.actual_minutes || 0) : 0,
+              sub_status
+            };
+          });
+
+          // Fallback logic for todo_status if no task log exists but subtasks have logs
+          if (!tLog && sub_tasks.length > 0) {
+            const allDone = sub_tasks.every((s: any) => s.sub_status === 'Done');
+            const allSkipped = sub_tasks.every((s: any) => s.sub_status === 'Skipped');
+            if (allDone) {
+              todo_status = 'DONE';
+            } else if (allSkipped) {
+              todo_status = 'SKIPPED';
+            }
+          }
+
+          const actual_time = tLog ? (tLog.actual_minutes || 0) : sub_tasks.reduce((sum: number, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_minutes || 0) : 0), 0);
+
+          completions[todoDate] = {
+            todo_status,
+            actual_time,
+            sub_tasks
+          };
+        });
+
+        const enrichedMeta = {
+          ...meta,
+          completions
+        };
+
+        return {
+          ...task,
+          description: JSON.stringify(enrichedMeta),
+          task_name: task.title,
+          type: task.task_type
+        };
+      });
+
       set({
-        tasks: data || [],
+        tasks: processed,
         tasksLoaded: true,
         tasksLoading: false
       });
@@ -310,7 +442,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchDailyTasks: async (dateString: string) => {
+  fetchDailyTasks: async (startDateString: string, endDateString?: string) => {
     if (get().dailyTasksLoading) return;
     set({ dailyTasksLoading: true });
     try {
@@ -319,26 +451,48 @@ export const useAppStore = create<AppState>((set, get) => ({
         .from('tasks')
         .select(`
           *,
-          projects(name),
-          teams(name),
-          tags(name, color),
           subtasks(*)
-        `)
-        .eq('is_active', true);
+        `);
 
       if (tasksError) throw tasksError;
 
-      // 2. Fetch daily logs for the target date
+      // 2. Fetch daily logs for the target date or date range
+      let taskLogsQuery = supabase.from('task_logs').select('*');
+      let subtaskLogsQuery = supabase.from('subtask_logs').select('*');
+
+      if (endDateString) {
+        taskLogsQuery = taskLogsQuery.gte('todo_date', startDateString).lte('todo_date', endDateString);
+        subtaskLogsQuery = subtaskLogsQuery.gte('todo_date', startDateString).lte('todo_date', endDateString);
+      } else {
+        taskLogsQuery = taskLogsQuery.eq('todo_date', startDateString);
+        subtaskLogsQuery = subtaskLogsQuery.eq('todo_date', startDateString);
+      }
+
       const [taskLogsRes, subtaskLogsRes] = await Promise.all([
-        supabase.from('task_logs').select('*').eq('todo_date', dateString),
-        supabase.from('subtask_logs').select('*').eq('todo_date', dateString)
+        taskLogsQuery,
+        subtaskLogsQuery
       ]);
 
       const taskLogsData = taskLogsRes.data || [];
       const subtaskLogsData = subtaskLogsRes.data || [];
 
       // 3. Assemble and virtualize on the frontend
-      const processed = (tasksData || []).map((task: any) => {
+      const processed = (tasksData || []).map((tRaw: any) => {
+        // Enforce unique subtasks by database primary key id to prevent double subtasks
+        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) =>
+          self.findIndex((s: any) => s.id === sub.id) === index
+        );
+        const task = { ...tRaw, subtasks: uniqueSubs };
+        
+        // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
+        const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
+        const meta = {
+          project_name: task.project_name || '',
+          team_name: firstTeamName,
+          tag_name: task.tag_name || '',
+          note: (task.description && !task.description.startsWith('{')) ? task.description : ''
+        };
+
         const taskLogs = taskLogsData.filter((log: any) => log.task_id === task.id);
         
         const subtasksWithLogs = (task.subtasks || []).map((subtask: any) => {
@@ -352,6 +506,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         return {
           ...task,
+          description: JSON.stringify(meta),
           task_name: task.task_name || task.title, // Backward compatibility with task_name property
           type: task.type || task.task_type, // Map task_type to legacy type
           subtasks: subtasksWithLogs,

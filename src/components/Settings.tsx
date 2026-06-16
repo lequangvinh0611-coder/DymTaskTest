@@ -145,68 +145,27 @@ export default function Settings() {
             }
           }
 
-          // 2. Update task fields based on activeTab (Projects, Teams, Tags)
-          const { data: allTasks } = await supabase.from('tasks').select('*');
-          if (allTasks) {
-            for (const task of allTasks) {
-              let updated = false;
-              let pName = task.project_name || '';
-              let tName = task.team_name || '';
-              let tgName = task.tag_name || '';
+          // 2. Direct RDBMS update on task and subtask fields based on activeTab (Projects, Teams, Tags)
+          if (activeTab === 'PROJECTS') {
+            await supabase
+              .from('tasks')
+              .update({ project_name: newName })
+              .eq('project_name', oldName);
+          } else if (activeTab === 'TEAMS') {
+            await supabase
+              .from('subtasks')
+              .update({ team_name: newName })
+              .eq('team_name', oldName);
               
-              if (activeTab === 'PROJECTS' && pName.toUpperCase().trim() === oldName) {
-                pName = newName;
-                updated = true;
-              }
-              if (activeTab === 'TEAMS' && tName.toUpperCase().trim() === oldName) {
-                tName = newName;
-                updated = true;
-              }
-              if (activeTab === 'TAGS' && tgName.toUpperCase().trim() === oldName) {
-                tgName = newName;
-                updated = true;
-              }
-              
-              const meta = task.meta || {};
-              if (activeTab === 'PROJECTS' && meta.project_name && meta.project_name.toUpperCase().trim() === oldName) {
-                meta.project_name = newName;
-                updated = true;
-              }
-              if (activeTab === 'TEAMS' && meta.team_name && meta.team_name.toUpperCase().trim() === oldName) {
-                meta.team_name = newName;
-                updated = true;
-              }
-              if (activeTab === 'TAGS' && meta.tag_name && meta.tag_name.toUpperCase().trim() === oldName) {
-                meta.tag_name = newName;
-                updated = true;
-              }
-              
-              if (Array.isArray(meta.versions)) {
-                meta.versions.forEach((v: any) => {
-                  if (activeTab === 'PROJECTS' && v.project_name && v.project_name.toUpperCase().trim() === oldName) {
-                    v.project_name = newName;
-                    updated = true;
-                  }
-                  if (activeTab === 'TEAMS' && v.team_name && v.team_name.toUpperCase().trim() === oldName) {
-                    v.team_name = newName;
-                    updated = true;
-                  }
-                  if (activeTab === 'TAGS' && v.tag_name && v.tag_name.toUpperCase().trim() === oldName) {
-                    v.tag_name = newName;
-                    updated = true;
-                  }
-                });
-              }
-              
-              if (updated) {
-                await supabase.from('tasks').update({ 
-                  project_name: pName, 
-                  team_name: tName, 
-                  tag_name: tgName, 
-                  meta 
-                }).eq('id', task.id);
-              }
-            }
+            await supabase
+              .from('subtask_logs')
+              .update({ team_name: newName })
+              .eq('team_name', oldName);
+          } else if (activeTab === 'TAGS') {
+            await supabase
+              .from('tasks')
+              .update({ tag_name: newName })
+              .eq('tag_name', oldName);
           }
         }
         
@@ -271,70 +230,11 @@ export default function Settings() {
       const newName = data.name?.trim();
       
       if (oldName && newName && oldName !== newName) {
-        const { data: allTasks } = await supabase.from('tasks').select('*');
-        if (allTasks) {
-          for (const task of allTasks) {
-            let updated = false;
-            
-            // 1. Update main assignees
-            let assignees = Array.isArray(task.assignees) ? task.assignees : [];
-            if (assignees.includes(oldName)) {
-              assignees = assignees.map(a => a === oldName ? newName : a);
-              updated = true;
-            }
-            
-            // 2. Update main sub_tasks
-            let sub_tasks = Array.isArray(task.sub_tasks) ? task.sub_tasks : [];
-            sub_tasks.forEach((sub: any) => {
-              if (sub.assignee === oldName) {
-                sub.assignee = newName;
-                updated = true;
-              }
-            });
-            
-            // 3. Update meta nested items
-            const meta = task.meta || {};
-            if (Array.isArray(meta.sub_tasks)) {
-              meta.sub_tasks.forEach((sub: any) => {
-                if (sub.assignee === oldName) {
-                  sub.assignee = newName;
-                  updated = true;
-                }
-              });
-            }
-            
-            if (Array.isArray(meta.versions)) {
-              meta.versions.forEach((v: any) => {
-                if (Array.isArray(v.sub_tasks)) {
-                  v.sub_tasks.forEach((sub: any) => {
-                    if (sub.assignee === oldName) {
-                      sub.assignee = newName;
-                      updated = true;
-                    }
-                  });
-                }
-              });
-            }
-            
-            if (meta.completions && typeof meta.completions === 'object') {
-              Object.keys(meta.completions).forEach((dateKey) => {
-                const comp = meta.completions[dateKey];
-                if (comp && Array.isArray(comp.sub_tasks)) {
-                  comp.sub_tasks.forEach((sub: any) => {
-                    if (sub.assignee === oldName) {
-                      sub.assignee = newName;
-                      updated = true;
-                    }
-                  });
-                }
-              });
-            }
-            
-            if (updated) {
-              await supabase.from('tasks').update({ assignees, sub_tasks, meta }).eq('id', task.id);
-            }
-          }
-        }
+        // Direct RDBMS update on subtasks table where assignee is located
+        await supabase
+          .from('subtasks')
+          .update({ assignee: newName })
+          .eq('assignee', oldName);
       }
 
       const { error } = await supabase

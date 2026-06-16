@@ -39,18 +39,21 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS team_ids TEXT[] DEFAULT '{}';
 CREATE TABLE IF NOT EXISTS public.projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT UNIQUE NOT NULL,
+    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.teams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT UNIQUE NOT NULL,
+    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.tags (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT UNIQUE NOT NULL,
+    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -84,6 +87,55 @@ CREATE TABLE IF NOT EXISTS public.tasks (
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS team_ids TEXT[] DEFAULT '{}';
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS display_id SERIAL; -- Note: Adding SERIAL to existing column is tricky, usually better to create with it.
 ALTER TABLE public.tasks ADD CONSTRAINT tasks_display_id_unique UNIQUE (display_id);
+
+-- 4. Create Subtasks Table
+CREATE TABLE IF NOT EXISTS public.subtasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    assignee TEXT,
+    estimated_minutes INTEGER DEFAULT 0,
+    actual_minutes INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    team_name TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_subtasks_task_id ON public.subtasks (task_id);
+
+-- 5. Create Task Logs Table
+CREATE TABLE IF NOT EXISTS public.task_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID REFERENCES public.tasks(id) ON DELETE CASCADE,
+    todo_date DATE NOT NULL,
+    status TEXT DEFAULT 'NEW',
+    actual_minutes INTEGER DEFAULT 0,
+    updated_by TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    CONSTRAINT unique_task_date UNIQUE (task_id, todo_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_logs_query ON public.task_logs (todo_date, task_id);
+
+-- 6. Create Subtask Logs Table
+CREATE TABLE IF NOT EXISTS public.subtask_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subtask_id UUID REFERENCES public.subtasks(id) ON DELETE CASCADE,
+    task_id UUID REFERENCES public.tasks(id) ON DELETE CASCADE,
+    todo_date DATE NOT NULL,
+    is_completed BOOLEAN DEFAULT true,
+    status TEXT DEFAULT 'DONE',
+    actual_minutes INTEGER DEFAULT 0,
+    completed_by TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    team_name TEXT,
+    CONSTRAINT unique_subtask_date UNIQUE (subtask_id, todo_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_subtask_logs_query ON public.subtask_logs (todo_date, subtask_id);
 
 -- 7. Create Audit Logs Table
 CREATE TABLE IF NOT EXISTS public.audit_logs (
@@ -165,6 +217,7 @@ BEGIN
     NEW.updated_at = now();
     RETURN NEW;
 END;
+EXCEPTION WHEN duplicate_function THEN NULL; END;
 $$ language 'plpgsql';
 
 -- 11. Enable Realtime (Idempotent)
@@ -204,7 +257,7 @@ CREATE TABLE IF NOT EXISTS public.approve_tasks (
     title TEXT NOT NULL,
     description JSONB NOT NULL, -- stores the TaskMetadata serialized as JSON
     task_type TEXT NOT NULL,
-    status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'REJECTED')),
+    status TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
     est_time INTEGER DEFAULT 0,
     actual_time INTEGER DEFAULT 0,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,

@@ -574,10 +574,8 @@ const ApproveTask: React.FC = () => {
                 task_type: request.task_type,
                 type: request.task_type,
                 est_time: final_est_time,
-                project_id: selectedProjectObj?.id || null,
-                team_id: selectedTeamObj?.id || null,
-                team_ids: selectedTeamObj?.id ? [selectedTeamObj.id] : [],
-                tag_id: selectedTagObj?.id || null,
+                project_name: request.meta.project_name || '',
+                tag_name: request.meta.tag_name || '',
                 deadline_time: finalDeadlineTime,
                 deadline_days: deadlineDaysArray
               })
@@ -589,7 +587,7 @@ const ApproveTask: React.FC = () => {
             // Tránh xóa trắng subtask cũ của task template, tiến hành so sánh theo ID
             const { data: dbSubtasks, error: fetchSubError } = await supabase
               .from('subtasks')
-              .select('id, subtask_id')
+              .select('id')
               .eq('task_id', request.meta.original_task_id);
 
             if (fetchSubError) throw fetchSubError;
@@ -601,10 +599,9 @@ const ApproveTask: React.FC = () => {
             const subtasksToInsert: any[] = [];
             const subtasksToDelete: any[] = [];
 
-            // Tạo map tìm kiếm nhanh subtask trong Database theo cả id và subtask_id
+            // Tạo map tìm kiếm nhanh subtask trong Database theo ID
             const dbSubtaskMap = new Map();
             dbSubsArray.forEach((dbSub: any) => {
-              dbSubtaskMap.set(dbSub.subtask_id, dbSub);
               dbSubtaskMap.set(dbSub.id, dbSub);
             });
 
@@ -620,19 +617,20 @@ const ApproveTask: React.FC = () => {
                   id: matchedDbSub.id,
                   content: st.content,
                   assignee: st.assignee,
-                  estimated_minutes: Number(st.estimated_minutes) || 0
+                  estimated_minutes: Number(st.estimated_minutes) || 0,
+                  team_name: request.meta.team_name || ''
                 });
                 seenDbIds.add(matchedDbSub.id);
               } else {
                 // Nhóm INSERT: Không thấy ID khớp, chèn mới subtask bản ghi kèm theo task_id 
                 subtasksToInsert.push({
                   task_id: request.meta.original_task_id,
-                  subtask_id: st.id || Math.random().toString(36).substring(2, 9),
                   content: st.content,
                   assignee: st.assignee,
                   estimated_minutes: Number(st.estimated_minutes) || 0,
                   actual_minutes: 0,
-                  status: 'PENDING'
+                  status: 'PENDING',
+                  team_name: request.meta.team_name || ''
                 });
               }
             });
@@ -697,10 +695,8 @@ const ApproveTask: React.FC = () => {
                 is_active: true,
                 est_time: final_est_time,
                 actual_time: 0,
-                project_id: selectedProjectObj?.id || null,
-                team_id: selectedTeamObj?.id || null,
-                team_ids: selectedTeamObj?.id ? [selectedTeamObj.id] : [],
-                tag_id: selectedTagObj?.id || null,
+                project_name: request.meta.project_name || '',
+                tag_name: request.meta.tag_name || '',
                 deadline_time: finalDeadlineTime,
                 deadline_days: deadlineDaysArray
               }])
@@ -716,12 +712,12 @@ const ApproveTask: React.FC = () => {
             // Chèn toàn bộ các subtasks đi kèm vào bảng subtasks
             const subtasksToInsert = (request.meta.sub_tasks || []).map((st: any) => ({
               task_id: newTaskId,
-              subtask_id: st.id || Math.random().toString(36).substring(2, 9),
               content: st.content,
               assignee: st.assignee,
               estimated_minutes: Number(st.estimated_minutes) || 0,
               actual_minutes: 0,
-              status: 'PENDING'
+              status: 'PENDING',
+              team_name: request.meta.team_name || ''
             }));
 
             if (subtasksToInsert.length > 0) {

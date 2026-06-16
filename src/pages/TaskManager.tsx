@@ -316,19 +316,27 @@ const TaskManager: React.FC = () => {
     return tasks.map(task => {
       const meta = parseTaskDescription(task.description);
       return {
-        ...task,
+        id: task.id,
+        title: task.title || '',
+        task_type: task.task_type || '',
+        status: task.status || 'ON',
+        is_active: task.is_active ?? true,
+        est_time: task.est_time || 0,
+        actual_time: task.actual_time || 0,
+        created_at: task.created_at,
+        display_id: task.display_id,
         meta,
-        project_name: task.projects?.name || meta.project_name || '',
-        team_name: task.teams?.name || meta.team_name || '',
-        tag_name: task.tags?.name || meta.tag_name || '',
+        project_name: meta.project_name || '',
+        team_name: meta.team_name || '',
+        tag_name: meta.tag_name || '',
         deadline_time: task.deadline_time ? (task.deadline_time.slice(0, 5)) : '',
         deadline_days: task.deadline_days || '',
         sub_tasks: (task.subtasks && task.subtasks.length > 0)
           ? task.subtasks.map((st: any) => ({
-              id: st.subtask_id || st.id,
-              content: st.content,
-              assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes
+              id: st.id,
+              content: st.content || '',
+              assignee: st.assignee || '',
+              estimated_minutes: st.estimated_minutes || 0
             }))
           : [],
         last_updated_by: '',

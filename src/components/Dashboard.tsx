@@ -501,7 +501,10 @@ export default function Dashboard() {
       meta.deadline_days = task.deadline_days || meta.deadline_days;
       meta.deadline_time = task.deadline_time ? task.deadline_time.slice(0, 5) : meta.deadline_time;
       if (task.subtasks && task.subtasks.length > 0) {
-        meta.sub_tasks = task.subtasks.map((st: any) => ({
+        const uniqueSubtasks = task.subtasks.filter((sub: any, index: number, self: any[]) =>
+          self.findIndex((s: any) => s.id === sub.id) === index
+        );
+        meta.sub_tasks = uniqueSubtasks.map((st: any) => ({
           id: st.subtask_id || st.id,
           content: st.content,
           name: st.content,
@@ -771,13 +774,26 @@ export default function Dashboard() {
     return weekDays.map(day => {
       const dayTasks: any[] = [];
       tasks.forEach(task => {
-        // Must be active task setting, except for ONETIME tasks which we count even when inactive/OFF
-        if (task.is_active !== true) {
-          const isOneTime = (task.task_type || '').toUpperCase() === 'ONETIME';
-          if (!isOneTime) return;
+        const meta = parseDescriptionMeta(task.description);
+        // Backwards-compatible override using direct database properties
+        meta.project_name = task.projects?.name || meta.project_name;
+        meta.team_name = task.teams?.name || meta.team_name;
+        meta.tag_name = task.tags?.name || meta.tag_name;
+        meta.deadline_days = task.deadline_days || meta.deadline_days;
+        meta.deadline_time = task.deadline_time ? task.deadline_time.slice(0, 5) : meta.deadline_time;
+        if (task.subtasks && task.subtasks.length > 0) {
+          const uniqueSubtasks = task.subtasks.filter((sub: any, index: number, self: any[]) =>
+            self.findIndex((s: any) => s.id === sub.id) === index
+          );
+          meta.sub_tasks = uniqueSubtasks.map((st: any) => ({
+            id: st.subtask_id || st.id,
+            content: st.content,
+            name: st.content,
+            assignee: st.assignee,
+            estimated_minutes: st.estimated_minutes
+          }));
         }
 
-        const meta = parseDescriptionMeta(task.description);
         const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY'].includes((task.task_type || '').toUpperCase());
 
         if (isRecurring) {

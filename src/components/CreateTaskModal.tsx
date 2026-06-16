@@ -733,18 +733,16 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
       // Construct compliant RDBMS payload with matching properties for schema compatibility
       const payload = {
         title: taskName.trim(),
-        description: JSON.stringify(metadataForDb), // description now holds clean stringified JSON of 4 static properties
+        description: note.trim(), // description now holds clean note
         task_type: taskType,
         est_time: totalEstMinutes,
         status: hasUnfinishedTarget ? 'ON' : 'OFF',
         is_active: !!hasUnfinishedTarget,
         actual_time: isEditMode && taskToEdit ? taskToEdit.actual_time : 0,
-
-        // Direct relational foreign keys (Notice: no team_id or team_ids column in database schema)
-        project_id: selectedProjectObj?.id || null,
-        tag_id: selectedTagObj?.id || null,
+        project_name: project || '',
+        tag_name: tag || '',
         deadline_time: deadlineTime24h ? (deadlineTime24h.includes(':') && deadlineTime24h.split(':').length === 2 ? `${deadlineTime24h}:00` : deadlineTime24h) : null,
-        deadline_days: computedDeadlineDays // Direct flat string for the TEXT column
+        deadline_days: computedDeadlineDays
       };
 
       if (isEditMode && taskToEdit) {
@@ -760,7 +758,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         // 1. Quét danh sách các subtask hiện có trong DB của bản mẫu task_id này
         const { data: dbSubtasks, error: fetchSubError } = await supabase
           .from('subtasks')
-          .select('id, subtask_id')
+          .select('id')
           .eq('task_id', taskToEdit.id);
 
         if (fetchSubError) throw fetchSubError;
@@ -773,29 +771,29 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
 
         subTasks.forEach((st: any) => {
           const matchedDbSub = dbSubs.find(
-            (dbSub: any) => dbSub.subtask_id === st.id || dbSub.id === st.id
+            (dbSub: any) => dbSub.id === st.id
           );
 
           if (matchedDbSub) {
             subTasksToUpdate.push({
               id: matchedDbSub.id,
               task_id: taskToEdit.id,
-              subtask_id: st.id,
               content: st.content,
               assignee: st.assignee,
               estimated_minutes: st.estimated_minutes,
               actual_minutes: 0,
-              status: 'PENDING'
+              status: 'PENDING',
+              team_name: team || ''
             });
           } else {
             subTasksToInsert.push({
               task_id: taskToEdit.id,
-              subtask_id: st.id,
               content: st.content,
               assignee: st.assignee,
               estimated_minutes: st.estimated_minutes,
               actual_minutes: 0,
-              status: 'PENDING'
+              status: 'PENDING',
+              team_name: team || ''
             });
           }
         });
@@ -803,7 +801,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         // 3. Tìm các subtasks đã bị Admin bấm xóa trên UI
         const subTasksToDelete = dbSubs.filter((dbSub: any) => {
           return !subTasks.some(
-            (st: any) => st.id === dbSub.subtask_id || st.id === dbSub.id
+            (st: any) => st.id === dbSub.id
           );
         });
 
@@ -859,12 +857,12 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         // B. Lưu hàng loạt Subtasks bản mẫu cho Task mới
         const subtasksToInsert = subTasks.map((st: any) => ({
           task_id: taskId,
-          subtask_id: st.id,
           content: st.content,
           assignee: st.assignee,
           estimated_minutes: st.estimated_minutes,
           actual_minutes: 0,
-          status: 'PENDING'
+          status: 'PENDING',
+          team_name: team || ''
         }));
 
         if (subtasksToInsert.length > 0) {
