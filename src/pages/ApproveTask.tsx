@@ -716,7 +716,6 @@ const ApproveTask: React.FC = () => {
             .from('tasks')
             .update({
               title: request.title,
-              task_name: request.title,
               description: request.meta.note || '',
               task_type: request.task_type,
               type: request.task_type,
@@ -817,7 +816,6 @@ const ApproveTask: React.FC = () => {
           .from('tasks')
           .insert([{
             title: request.title,
-            task_name: request.title,
             description: request.meta.note || '',
             task_type: request.task_type,
             type: request.task_type,

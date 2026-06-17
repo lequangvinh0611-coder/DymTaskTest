@@ -330,7 +330,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           }
         }
 
-        setSubTasks(meta.sub_tasks || []);
+        setSubTasks(taskToEdit.sub_tasks || meta.sub_tasks || []);
       } else if (taskToClone) {
         const meta = parseTaskDescription(taskToClone.description);
         setTaskName(taskToClone.title || '');
@@ -374,7 +374,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           }
         }
 
-        const clonedSubtasks = (meta.sub_tasks || []).map((sb: any) => ({
+        const clonedSubtasks = (taskToClone.sub_tasks || meta.sub_tasks || []).map((sb: any) => ({
           ...sb,
           id: originalTaskId ? sb.id : Math.random().toString(36).substring(2, 9)
         }));
