@@ -453,6 +453,66 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
     return masterData.assignees.map(name => ({ value: name, label: name }));
   }, [masterData.assignees]);
 
+  const isUnchanged = useMemo(() => {
+    const sourceTask = taskToEdit || taskToClone;
+    if (!sourceTask) return false;
+
+    const sourceMeta = parseTaskDescription(sourceTask.description);
+    
+    if (taskName.trim().toLowerCase() !== (sourceTask.title || '').trim().toLowerCase()) return false;
+    if (project !== (sourceMeta.project_name || '')) return false;
+    if (team !== (sourceMeta.team_name || '')) return false;
+    if (tag !== (sourceMeta.tag_name || '')) return false;
+    if (taskType !== (sourceTask.task_type || '')) return false;
+    if (note.trim().toLowerCase() !== (sourceMeta.note || '').trim().toLowerCase()) return false;
+    
+    const sourceTime24 = sourceMeta.deadline_time ? convertTo24h(sourceMeta.deadline_time) : '';
+    if (deadlineTime24h !== sourceTime24) return false;
+    
+    if (taskType === 'WEEKLY') {
+      const sourceDaysStr = sourceMeta.deadline_days || '';
+      const sourceDays = sourceDaysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
+      const isWeeklyEqual = selectedDays.length === sourceDays.length && selectedDays.every((d, i) => d === sourceDays[i]);
+      if (!isWeeklyEqual) return false;
+    } else if (taskType === 'MONTHLY') {
+      if (monthlyDays.trim() !== (sourceMeta.deadline_days || '').trim()) return false;
+    } else if (taskType === 'ONETIME') {
+      const sourceTargets = sourceMeta.onetime_targets || [];
+      const sortedSource = [...sourceTargets].sort((a: any, b: any) => (a.date || '').localeCompare(b.date || ''));
+      const sourceStart = sortedSource[0]?.date || sourceMeta.deadline_days || '';
+      const sourceEnd = sortedSource[sortedSource.length - 1]?.date || sourceMeta.deadline_days || '';
+      if (onetimeStartDate !== sourceStart || onetimeEndDate !== sourceEnd) return false;
+    }
+    
+    const sourceSubtasks = sourceMeta.sub_tasks || [];
+    if (subTasks.length !== sourceSubtasks.length) return false;
+    const isSubtasksEqual = subTasks.every((st, idx) => {
+      const orig = sourceSubtasks[idx];
+      if (!orig) return false;
+      return st.content.trim().toLowerCase() === orig.content.trim().toLowerCase() &&
+             st.assignee === orig.assignee &&
+             Number(st.estimated_minutes) === Number(orig.estimated_minutes);
+    });
+    if (!isSubtasksEqual) return false;
+
+    return true;
+  }, [
+    taskToEdit,
+    taskToClone,
+    taskName,
+    project,
+    team,
+    tag,
+    taskType,
+    note,
+    deadlineTime24h,
+    selectedDays,
+    monthlyDays,
+    onetimeStartDate,
+    onetimeEndDate,
+    subTasks
+  ]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -1121,8 +1181,9 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
             </button>
             <button 
               type="submit" 
-              disabled={loading} 
+              disabled={loading || isUnchanged} 
               className="flex-1 h-8 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+              title={isUnchanged ? "No changes to submit" : ""}
             >
               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin text-white" /> : null}
               <span>

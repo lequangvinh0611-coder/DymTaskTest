@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Search, RotateCcw, Plus, Trash2, Power, Clock, Download, 
   ChevronLeft, ChevronRight, Edit2, MoreHorizontal, X, HelpCircle,
-  Building, Briefcase, Tag, Users, Check, AlertCircle, FileSpreadsheet, Loader2
+  Building, Briefcase, Tag, Users, Check, AlertCircle, FileSpreadsheet, Loader2, History, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
@@ -30,6 +30,7 @@ interface TaskMetadata {
   team_name: string;
   tag_name: string;
   note: string;
+  versions?: any[];
 }
 
 // Database schema representation
@@ -113,7 +114,8 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
     project_name: '',
     team_name: '',
     tag_name: '',
-    note: ''
+    note: '',
+    versions: []
   };
 
   if (!rawDescription) return defaultMeta;
@@ -123,7 +125,8 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
       project_name: rawDescription.project_name || '',
       team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
-      note: rawDescription.note || rawDescription.description || ''
+      note: rawDescription.note || rawDescription.description || '',
+      versions: rawDescription.versions || []
     };
   }
 
@@ -136,7 +139,8 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
           project_name: parsed.project_name || '',
           team_name: parsed.team_name || '',
           tag_name: parsed.tag_name || '',
-          note: parsed.note || parsed.description || ''
+          note: parsed.note || parsed.description || '',
+          versions: parsed.versions || []
         };
       } catch {
         // Fallback
@@ -205,6 +209,9 @@ const TaskManager: React.FC = () => {
   });
 
   const [filterTaskType, setFilterTaskType] = useState(() => sessionStorage.getItem('mgr_filterTaskType') || '');
+  const selectedTaskTypes = useMemo(() => {
+    return filterTaskType ? filterTaskType.split(',').filter(Boolean) : [];
+  }, [filterTaskType]);
 
   useEffect(() => {
     sessionStorage.setItem('mgr_searchQuery', searchQuery);
@@ -239,6 +246,14 @@ const TaskManager: React.FC = () => {
 
   // Drawer Panel & Modal view states
   const [openedDrawerTask, setOpenedDrawerTask] = useState<DbTask | null>(null);
+  const [drawerTab, setDrawerTab] = useState<'details' | 'history'>('details');
+  const [expandedVersions, setExpandedVersions] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    if (openedDrawerTask) {
+      setDrawerTab('details');
+    }
+  }, [openedDrawerTask]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalTask, setModalTask] = useState<DbTask | null>(null); // Null for create view, populated for edit view
   const [taskToClone, setTaskToClone] = useState<DbTask | null>(null);
@@ -316,6 +331,7 @@ const TaskManager: React.FC = () => {
     return tasks.map(task => {
       const meta = parseTaskDescription(task.description);
       return {
+        ...task,
         id: task.id,
         title: task.title || '',
         task_type: task.task_type || '',
@@ -413,7 +429,9 @@ const TaskManager: React.FC = () => {
       }
 
       // 5.5. Task Type Filter
-      if (filterTaskType && (task.task_type || '').toUpperCase() !== filterTaskType.toUpperCase()) return false;
+      if (selectedTaskTypes.length > 0) {
+        if (!selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return false;
+      }
 
       // 6. Status Filter ('ON', 'OFF')
       if (filterStatus) {
@@ -422,7 +440,7 @@ const TaskManager: React.FC = () => {
 
       return true;
     });
-  }, [parsedTasks, searchQuery, filterPersonnel, filterTag, filterProject, filterTeam, filterStatus, filterTaskType, getTaskTeams]);
+  }, [parsedTasks, searchQuery, filterPersonnel, filterTag, filterProject, filterTeam, filterStatus, selectedTaskTypes, getTaskTeams]);
 
   // Handle client-side pagination
   const totalCount = filteredTasks.length;
@@ -704,6 +722,10 @@ const TaskManager: React.FC = () => {
     return parseTaskDescription(openedDrawerTask.description);
   }, [openedDrawerTask]);
 
+  const historyVersions = useMemo(() => {
+    return drawerParsedMeta?.versions || [];
+  }, [drawerParsedMeta]);
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-white overflow-x-auto relative font-sans">
       
@@ -794,7 +816,7 @@ const TaskManager: React.FC = () => {
           />
 
           {/* Filter Task Type */}
-          <FilterSelect 
+          <MultiTeamFilterSelect 
             value={filterTaskType}
             onChange={(val) => {
               setFilterTaskType(val);
@@ -1195,7 +1217,39 @@ const TaskManager: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Tab Switcher */}
+            <div className="flex border-b border-slate-100 shrink-0 bg-slate-50/50 p-1.5 gap-1 shadow-inner relative z-20">
+              <button
+                onClick={() => setDrawerTab('details')}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                  drawerTab === 'details'
+                    ? 'bg-white text-indigo-600 shadow-xs border border-slate-100/80 font-bold'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/40'
+                }`}
+              >
+                Details
+              </button>
+              <button
+                onClick={() => setDrawerTab('history')}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  drawerTab === 'history'
+                    ? 'bg-white text-indigo-600 shadow-xs border border-slate-100/80 font-bold'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/40'
+                }`}
+              >
+                <span>History</span>
+                {historyVersions.length > 0 && (
+                  <span className={`px-1.5 py-0.2 text-[9px] rounded-full font-bold ${
+                    drawerTab === 'history' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-200/85 text-slate-600'
+                  }`}>
+                    {historyVersions.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {drawerTab === 'details' ? (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {/* Task template heading with toggle switch */}
               <div className="flex items-start justify-between">
                 <div>
@@ -1307,6 +1361,120 @@ const TaskManager: React.FC = () => {
                 </div>
               </div>
             </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                {historyVersions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                    <History size={32} className="text-slate-300 stroke-[1.5] mb-2" />
+                    <span className="text-xs font-semibold text-slate-500">No version history</span>
+                    <p className="text-[11px] text-slate-400 max-w-[240px] mt-1 leading-normal">
+                      This task has not been edited or versioned yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3.5 pr-0.5 animate-in fade-in duration-200">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Revision Timeline ({historyVersions.length})
+                    </div>
+                    
+                    <div className="relative border-l-2 border-slate-200 pl-4 ml-1 space-y-5">
+                      {historyVersions.map((v: any, idx: number) => {
+                        const isExpanded = !!expandedVersions[idx];
+                        const subtasksCount = v.sub_tasks?.length || 0;
+                        return (
+                          <div key={idx} className="relative">
+                            {/* Dot indicator */}
+                            <span className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-500 ring-4 ring-white border border-indigo-600 block shrink-0" />
+                            
+                            <div className="bg-white border border-slate-150 rounded-xl p-3 shadow-xs hover:border-slate-300 transition-all">
+                              {/* Validity and Version badge row */}
+                              <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 mb-2 pb-1.5 border-b border-slate-100">
+                                <span className="font-semibold text-slate-600 flex items-center gap-1">
+                                  <Clock size={11} className="text-slate-400" />
+                                  {formatDisplayDate(v.valid_from)} ~ {formatDisplayDate(v.valid_until)}
+                                </span>
+                                <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.2 rounded font-bold border border-indigo-100">
+                                  Rev #{historyVersions.length - idx}
+                                </span>
+                              </div>
+
+                              {/* Title */}
+                              <h3 className="text-xs font-bold text-slate-800 leading-snug break-words">
+                                {v.title}
+                              </h3>
+
+                              {/* Tags Grid */}
+                              <div className="grid grid-cols-2 gap-1.5 mt-2.5 text-[10px]">
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Project</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">{v.project_name || 'N/A'}</span>
+                                </div>
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Team</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">{v.team_name || 'N/A'}</span>
+                                </div>
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Tag</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">{v.tag_name || 'N/A'}</span>
+                                </div>
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Deadline</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">
+                                    {v.deadline_time || '17:00'} ({formatDisplayDate(v.deadline_days)})
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Note / Description */}
+                              {v.description && (
+                                <div className="mt-2.5 bg-slate-50 rounded p-2 text-[11px] text-slate-600 border border-slate-100 leading-normal whitespace-pre-wrap break-words">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">Link Note</span>
+                                  {v.description}
+                                </div>
+                              )}
+
+                              {/* Subtasks view */}
+                              {subtasksCount > 0 && (
+                                <div className="mt-3 pt-2.5 border-t border-slate-100">
+                                  <button
+                                    onClick={() => setExpandedVersions(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                                    className="flex items-center justify-between w-full text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
+                                  >
+                                    <span>Sub-tasks ({subtasksCount})</span>
+                                    {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                  </button>
+
+                                  {isExpanded && (
+                                    <div className="mt-2 space-y-1.5 animate-in fade-in duration-205">
+                                      {v.sub_tasks.map((st: any, sIdx: number) => (
+                                        <div key={sIdx} className="bg-slate-50 border border-slate-100 rounded-lg p-2 flex flex-col gap-1 text-[11px]">
+                                          <div className="flex items-start justify-between gap-1.5">
+                                            <span className="font-medium text-slate-700 break-words flex-1">{st.content}</span>
+                                            {st.assignee && (
+                                              <span className="bg-white border border-slate-200 text-slate-500 rounded px-1.5 py-0.2 shrink-0 font-medium scale-95">
+                                                {st.assignee}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="text-[10px] text-slate-400 font-mono flex justify-between pt-0.5 border-t border-slate-100/50">
+                                            <span>Est duration:</span>
+                                            <span className="font-semibold text-slate-650">{st.estimated_minutes} min</span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Bottom Edit Action Button replacement with 4 Actions */}
             <div className="p-4 border-t border-slate-100 bg-slate-50/75 shrink-0 space-y-2 template-actions-footer">

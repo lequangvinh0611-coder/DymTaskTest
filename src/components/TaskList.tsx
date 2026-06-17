@@ -59,6 +59,8 @@ interface DbTask {
   created_at: string;
   assignees?: string[];
   display_id?: number | null;
+  deadline_days?: string | null;
+  deadline_time?: string | null;
 }
 
 interface VirtualTask extends DbTask {
@@ -102,7 +104,40 @@ const getVirtualOccurrences = (
   const endD = parseDateStringUTC(endDate);
 
   if (type === 'ONETIME') {
-    return [];
+    const datesParsed: string[] = [];
+    if (cleanDays.includes('~')) {
+      const parts = cleanDays.split('~').map(s => s.trim());
+      const startStr = parts[0];
+      const endStr = parts[1];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(startStr) && /^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
+        let curr = parseDateStringUTC(startStr);
+        const last = parseDateStringUTC(endStr);
+        while (curr <= last) {
+          datesParsed.push(formatDateUTC(curr));
+          curr.setUTCDate(curr.getUTCDate() + 1);
+        }
+      }
+    } else if (cleanDays.includes(',')) {
+      cleanDays.split(',').forEach(s => {
+        const dStr = s.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) {
+          datesParsed.push(dStr);
+        }
+      });
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDays)) {
+      datesParsed.push(cleanDays);
+    }
+
+    datesParsed.forEach(dateStr => {
+      if (dateStr >= startDate && dateStr <= endDate) {
+        occurrences.push({
+          todo_date: dateStr,
+          completion_key: dateStr
+        });
+      }
+    });
+
+    return occurrences;
   }
 
   const createdAtDate = createdAt ? createdAt.split('T')[0] : '';
@@ -406,6 +441,90 @@ const getTodayDateString = (): string => {
   return `${year}-${month}-${day}`;
 };
 
+const checkAndToggleOnetimeTemplateStatus = async (taskId: string) => {
+  const { data: task, error: fetchErr } = await supabase
+    .from('tasks')
+    .select(`
+      id,
+      task_type,
+      deadline_days,
+      task_logs:task_logs(todo_date, status)
+    `)
+    .eq('id', taskId)
+    .single();
+
+  if (fetchErr || !task) return;
+
+  const type = (task.task_type || '').toUpperCase();
+  if (type !== 'ONETIME') return;
+
+  const cleanDays = (task.deadline_days || '').trim();
+  const datesParsed: string[] = [];
+  if (cleanDays.includes('~')) {
+    const parts = cleanDays.split('~').map((s: string) => s.trim());
+    const startStr = parts[0];
+    const endStr = parts[1];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(startStr) && /^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
+      const parseDateStringUTC = (str: string): Date => {
+        const p = str.split('-');
+        return new Date(Date.UTC(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2])));
+      };
+      const formatDateUTC = (d: Date): string => {
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+      let curr = parseDateStringUTC(startStr);
+      const last = parseDateStringUTC(endStr);
+      while (curr <= last) {
+        datesParsed.push(formatDateUTC(curr));
+        curr.setUTCDate(curr.getUTCDate() + 1);
+      }
+    }
+  } else if (cleanDays.includes(',')) {
+    cleanDays.split(',').forEach((s: string) => {
+      const dStr = s.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) {
+        datesParsed.push(dStr);
+      }
+    });
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDays)) {
+    datesParsed.push(cleanDays);
+  }
+
+  if (datesParsed.length === 0) return;
+
+  const logs = task.task_logs || [];
+  const allCompleted = datesParsed.every(date => {
+    const log = logs.find((l: any) => l.todo_date === date);
+    return log && (log.status === 'DONE' || log.status === 'SKIPPED');
+  });
+
+  const nextStatus = allCompleted ? 'OFF' : 'ON';
+  const nextActive = !allCompleted;
+
+  const { error: updateErr } = await supabase
+    .from('tasks')
+    .update({
+      status: nextStatus,
+      is_active: nextActive
+    })
+    .eq('id', taskId);
+
+  if (!updateErr) {
+    useAppStore.setState(state => {
+      const nextDailyTasks = state.dailyTasks.map(t => {
+        if (t.id === taskId) {
+          return { ...t, status: nextStatus, is_active: nextActive };
+        }
+        return t;
+      });
+      return { dailyTasks: nextDailyTasks };
+    });
+  }
+};
+
 const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   const { currentUser, profile } = useAuthStore();
   const activeUser = currentUser || profile;
@@ -421,7 +540,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     dailyTasksLoaded,
     dailyTasksLoading,
     fetchDailyTasks,
-    fetchMetadata
+    fetchMetadata,
+    setDates
   } = useAppStore();
   const [localLoading, setLoading] = useState(false);
   
@@ -450,6 +570,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   });
   
   const [filterTaskType, setFilterTaskType] = useState(() => sessionStorage.getItem('todo_filterTaskType') || '');
+  const selectedTaskTypes = useMemo(() => {
+    return filterTaskType ? filterTaskType.split(',').filter(Boolean) : [];
+  }, [filterTaskType]);
   
   // Date configuration
   const [startDate, setStartDate] = useState(() => sessionStorage.getItem('todo_startDate') || getTodayDateString());
@@ -519,6 +642,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     // Run background cache updates silently
     fetchDailyTasks(startDate, endDate);
     fetchMetadata();
+    setDates(startDate, endDate);
   }, [startDate, endDate]);
 
   // Generate frontend trackable virtual tasks for DAILY, WEEKLY, MONTHLY, and ONETIME types within startDate & endDate
@@ -527,7 +651,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
     dailyTasks.forEach(task => {
       const type = (task.task_type || 'DAILY').toUpperCase();
-      const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY'].includes(type);
+      const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONETIME'].includes(type);
 
       const createdAtStr = task.created_at;
       // Convert deadline_days to string for getVirtualOccurrences if it's an array
@@ -556,47 +680,111 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             return;
           }
 
+          const hasLogRecord = !!matchedLog;
+          const isDoneOrSkipped = todo_status === 'DONE' || todo_status === 'SKIPPED';
+          const useLogData = hasLogRecord;
+          
+          const meta = parseTaskDescription(task.description);
+          const project_name = (useLogData && matchedLog && matchedLog.project_name) 
+            ? matchedLog.project_name 
+            : (task.projects?.name || meta.project_name || task.project_name || '');
+          const team_name = (useLogData && matchedLog && matchedLog.team_name)
+            ? matchedLog.team_name 
+            : (meta.team_name || task.team_name || '');
+          const tag_name = (useLogData && matchedLog && matchedLog.tag_name) 
+            ? matchedLog.tag_name 
+            : (task.tags?.name || meta.tag_name || task.tag_name || '');
+          const resolved_title = (useLogData && matchedLog && matchedLog.title)
+            ? matchedLog.title
+            : (task.title || '');
+          const resolved_deadline_time = (useLogData && matchedLog && matchedLog.deadline_time)
+            ? matchedLog.deadline_time
+            : (task.deadline_time || '17:00');
+          const resolved_deadline_days = (useLogData && matchedLog && matchedLog.deadline_days)
+            ? matchedLog.deadline_days
+            : deadlineDaysStr;
+          const resolved_task_type = (useLogData && matchedLog && matchedLog.task_type)
+            ? matchedLog.task_type
+            : type;
+
           // Map subtasks for this occurrence date
-          const sub_tasks = (task.subtasks || []).map((sub: any) => {
-            const log = sub.subtask_logs?.find((l: any) => l.todo_date === occ.todo_date);
-            let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
-            if (log) {
+          const matchedLogsForDate = useLogData 
+            ? (task.subtask_logs || []).filter((l: any) => l.todo_date === occ.todo_date)
+            : [];
+
+          let sub_tasks: any[] = [];
+          if (useLogData && matchedLogsForDate.length > 0) {
+            sub_tasks = matchedLogsForDate.map((log: any) => {
               const sUpper = (log.status || '').toUpperCase();
+              let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
               if (sUpper === 'DONE' || sUpper === 'SUBMITTED') sub_status = 'Done';
               else if (sUpper === 'SKIPPED') sub_status = 'Skipped';
               else if (sUpper === 'NEW') sub_status = 'New';
               else if (log.is_completed) sub_status = 'Done';
-            }
-            return {
-              ...sub,
-              id: sub.id,
-              name: sub.name || sub.content,
-              content: sub.content || sub.name,
-              assignee: sub.assignee,
-              estimated_minutes: sub.estimated_minutes,
-              actual_minutes: sub_status === 'Skipped' ? 0 : (sub.actual_minutes !== undefined ? sub.actual_minutes : sub.estimated_minutes),
-              sub_status
-            };
-          });
+
+              return {
+                id: log.subtask_id || log.id,
+                task_id: task.id,
+                name: log.content || '',
+                content: log.content || '',
+                assignee: log.assignee || '',
+                estimated_minutes: log.estimated_minutes !== undefined ? log.estimated_minutes : 0,
+                actual_minutes: log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? log.estimated_minutes : 0),
+                sub_status,
+                team_name: log.team_name || ''
+              };
+            });
+          } else {
+            sub_tasks = (task.subtasks || []).map((sub: any) => {
+              const log = sub.subtask_logs?.find((l: any) => l.todo_date === occ.todo_date);
+              let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
+              if (log) {
+                const sUpper = (log.status || '').toUpperCase();
+                if (sUpper === 'DONE' || sUpper === 'SUBMITTED') sub_status = 'Done';
+                else if (sUpper === 'SKIPPED') sub_status = 'Skipped';
+                else if (sUpper === 'NEW') sub_status = 'New';
+                else if (log.is_completed) sub_status = 'Done';
+              }
+
+              const log_actual = log ? log.actual_minutes : undefined;
+              let resolved_actual = undefined;
+              if (sub_status === 'Done') {
+                resolved_actual = log_actual !== undefined && log_actual !== null ? log_actual : sub.estimated_minutes;
+              } else if (sub_status === 'Skipped') {
+                resolved_actual = 0;
+              } else {
+                resolved_actual = log_actual; // undefined when no log
+              }
+
+              return {
+                ...sub,
+                id: sub.id,
+                name: sub.name || sub.content,
+                content: sub.content || sub.name,
+                assignee: sub.assignee,
+                estimated_minutes: sub.estimated_minutes,
+                actual_minutes: resolved_actual,
+                sub_status
+              };
+            });
+          }
 
           // Sum calculations for parent est_time and actual_time
-          const calc_est_time = sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+          const calc_est_time = (isDoneOrSkipped && matchedLog && matchedLog.est_time !== undefined && matchedLog.est_time !== null)
+            ? matchedLog.est_time
+            : sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+          
           const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
-
-          const meta = parseTaskDescription(task.description);
-          const project_name = task.projects?.name || meta.project_name || task.project_name || '';
-          const team_name = meta.team_name || task.team_name || '';
-          const tag_name = task.tags?.name || meta.tag_name || task.tag_name || '';
 
           list.push({
             ...task,
-            title: task.title || '',
-            task_type: type,
+            title: resolved_title,
+            task_type: resolved_task_type,
             project_name,
             team_name,
             tag_name,
-            deadline_time: task.deadline_time || '17:00',
-            deadline_days: deadlineDaysStr,
+            deadline_time: resolved_deadline_time,
+            deadline_days: resolved_deadline_days,
             est_time: calc_est_time,
             actual_time: calc_actual_time,
             virtual_id: `${task.id}_${occ.completion_key}`,
@@ -623,45 +811,107 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           }
 
           if (isTargetDate || hasLogForDate) {
-            const sub_tasks = (task.subtasks || []).map((sub: any) => {
-              const log = sub.subtask_logs?.find((l: any) => l.todo_date === todo_date);
-              let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
-              if (log) {
+            const hasLogRecord = !!matchedLog;
+            const isDoneOrSkipped = todo_status === 'DONE' || todo_status === 'SKIPPED';
+            const useLogData = hasLogRecord;
+            
+            const meta = parseTaskDescription(task.description);
+            const project_name = (useLogData && matchedLog && matchedLog.project_name) 
+              ? matchedLog.project_name 
+              : (task.projects?.name || meta.project_name || task.project_name || '');
+            const team_name = (useLogData && matchedLog && matchedLog.team_name)
+              ? matchedLog.team_name 
+              : (meta.team_name || task.team_name || '');
+            const tag_name = (useLogData && matchedLog && matchedLog.tag_name) 
+              ? matchedLog.tag_name 
+              : (task.tags?.name || meta.tag_name || task.tag_name || '');
+            const resolved_title = (useLogData && matchedLog && matchedLog.title)
+              ? matchedLog.title
+              : (task.title || '');
+            const resolved_deadline_time = (useLogData && matchedLog && matchedLog.deadline_time)
+              ? matchedLog.deadline_time
+              : (task.deadline_time || '17:00');
+            const resolved_deadline_days = (useLogData && matchedLog && matchedLog.deadline_days)
+              ? matchedLog.deadline_days
+              : deadlineDaysStr;
+            const resolved_task_type = (useLogData && matchedLog && matchedLog.task_type)
+              ? matchedLog.task_type
+              : type;
+
+            const matchedLogsForDate = useLogData 
+              ? (task.subtask_logs || []).filter((l: any) => l.todo_date === todo_date)
+              : [];
+
+            let sub_tasks: any[] = [];
+            if (useLogData && matchedLogsForDate.length > 0) {
+              sub_tasks = matchedLogsForDate.map((log: any) => {
                 const sUpper = (log.status || '').toUpperCase();
+                let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
                 if (sUpper === 'DONE' || sUpper === 'SUBMITTED') sub_status = 'Done';
                 else if (sUpper === 'SKIPPED') sub_status = 'Skipped';
                 else if (sUpper === 'NEW') sub_status = 'New';
                 else if (log.is_completed) sub_status = 'Done';
-              }
-              return {
-                ...sub,
-                id: sub.id,
-                name: sub.name || sub.content,
-                content: sub.content || sub.name,
-                assignee: sub.assignee,
-                estimated_minutes: sub.estimated_minutes,
-                actual_minutes: sub_status === 'Skipped' ? 0 : (sub.actual_minutes !== undefined ? sub.actual_minutes : sub.estimated_minutes),
-                sub_status
-              };
-            });
 
-            const calc_est_time = sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+                return {
+                  id: log.subtask_id || log.id,
+                  task_id: task.id,
+                  name: log.content || '',
+                  content: log.content || '',
+                  assignee: log.assignee || '',
+                  estimated_minutes: log.estimated_minutes !== undefined ? log.estimated_minutes : 0,
+                  actual_minutes: log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? log.estimated_minutes : 0),
+                  sub_status,
+                  team_name: log.team_name || ''
+                };
+              });
+            } else {
+              sub_tasks = (task.subtasks || []).map((sub: any) => {
+                const log = sub.subtask_logs?.find((l: any) => l.todo_date === todo_date);
+                let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
+                if (log) {
+                  const sUpper = (log.status || '').toUpperCase();
+                  if (sUpper === 'DONE' || sUpper === 'SUBMITTED') sub_status = 'Done';
+                  else if (sUpper === 'SKIPPED') sub_status = 'Skipped';
+                  else if (sUpper === 'NEW') sub_status = 'New';
+                  else if (log.is_completed) sub_status = 'Done';
+                }
+                const log_actual = log ? log.actual_minutes : undefined;
+                let resolved_actual = undefined;
+                if (sub_status === 'Done') {
+                  resolved_actual = log_actual !== undefined && log_actual !== null ? log_actual : (sub.estimated_minutes !== undefined ? sub.estimated_minutes : 0);
+                } else if (sub_status === 'Skipped') {
+                  resolved_actual = 0;
+                } else {
+                  resolved_actual = log_actual;
+                }
+                return {
+                  ...sub,
+                  id: sub.id,
+                  name: sub.name || sub.content,
+                  content: sub.content || sub.name,
+                  assignee: sub.assignee,
+                  estimated_minutes: sub.estimated_minutes,
+                  actual_minutes: resolved_actual,
+                  sub_status
+                };
+              });
+            }
+
+            const calc_est_time = (isDoneOrSkipped && matchedLog && matchedLog.est_time !== undefined && matchedLog.est_time !== null)
+              ? matchedLog.est_time
+              : sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+
             const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
-
-            const meta = parseTaskDescription(task.description);
-            const project_name = task.projects?.name || meta.project_name || task.project_name || '';
-            const team_name = meta.team_name || task.team_name || '';
-            const tag_name = task.tags?.name || meta.tag_name || task.tag_name || '';
 
             list.push({
               ...task,
-              title: task.title || '',
-              task_type: type,
+              title: resolved_title,
+              task_type: resolved_task_type,
               project_name,
               team_name,
               tag_name,
-              deadline_time: task.deadline_time || '17:00',
-              deadline_days: deadlineDaysStr,
+              deadline_time: resolved_deadline_time,
+              deadline_days: resolved_deadline_days,
               est_time: calc_est_time,
               actual_time: calc_actual_time,
               virtual_id: `${task.id}_${todo_date}`,
@@ -771,7 +1021,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       if (filterTodoStatus && task.todo_status !== filterTodoStatus) return false;
 
       // 6.5. Task Type filter
-      if (filterTaskType && (task.task_type || '').toUpperCase() !== filterTaskType.toUpperCase()) return false;
+      if (selectedTaskTypes.length > 0) {
+        if (!selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return false;
+      }
 
       // 7. Date Filter (matched to todo_date or creation date boundary)
       if (startDate && endDate) {
@@ -819,7 +1071,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       const titleB = b.title || '';
       return titleA.localeCompare(titleB, undefined, { sensitivity: 'base' });
     });
-  }, [virtualTasks, searchQuery, filterAssignee, filterTag, filterProject, filterTeam, filterTodoStatus, filterTaskType, startDate, endDate, profile, getTaskTeams]);
+  }, [virtualTasks, searchQuery, filterAssignee, filterTag, filterProject, filterTeam, filterTodoStatus, selectedTaskTypes, startDate, endDate, profile, getTaskTeams]);
 
   // Paginated client side calculation
   const totalCount = filteredTasks.length;
@@ -880,43 +1132,67 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     }
   };
 
-  // Submit task directly changing status to DONE from actions button
+  // Submit task from actions button, preserving Skipped states
   const handleDirectSubmit = async (task: VirtualTask) => {
     try {
       const updaterName = activeUser?.name || profile?.name || currentUser?.email || 'System';
 
-      // 1. Upsert task_logs
+      // 1. Determine status of subtasks and build the log payloads
+      const subtaskLogsToSave = (task.sub_tasks || []).map(sub => {
+        const rawStatus = sub.sub_status || 'New';
+        const finalStatus = rawStatus === 'Skipped' ? 'SKIPPED' : 'DONE';
+        const isCompleted = finalStatus === 'DONE';
+        
+        return {
+          subtask_id: sub.id,
+          task_id: task.id,
+          todo_date: task.todo_date,
+          status: finalStatus,
+          is_completed: isCompleted,
+          completed_by: updaterName,
+          team_name: sub.team_name || '',
+          content: sub.content || sub.name || '',
+          assignee: sub.assignee || '',
+          estimated_minutes: sub.estimated_minutes || 0,
+          actual_minutes: finalStatus === 'DONE' ? (sub.actual_minutes !== undefined && sub.actual_minutes !== null ? sub.actual_minutes : (sub.estimated_minutes || 0)) : 0
+        };
+      });
+
+      // 2. Determine parent task status
+      const allSkipped = subtaskLogsToSave.length > 0 && subtaskLogsToSave.every(s => s.status === 'SKIPPED');
+      const newStatus = allSkipped ? 'SKIPPED' : 'DONE';
+
+      // 3. Save subtask logs to DB
+      if (subtaskLogsToSave.length > 0) {
+        await Promise.all(subtaskLogsToSave.map(async (payload) => {
+          await supabase
+            .from('subtask_logs')
+            .upsert(payload, { onConflict: 'subtask_id,todo_date' });
+        }));
+      }
+
+      // 4. Save parent task log to DB
       const { error: logErr } = await supabase
         .from('task_logs')
         .upsert({
           task_id: task.id,
           todo_date: task.todo_date,
-          status: 'DONE',
-          updated_by: updaterName
+          status: newStatus,
+          updated_by: updaterName,
+          title: task.title || '',
+          project_name: task.project_name || '',
+          tag_name: task.tag_name || '',
+          deadline_time: task.deadline_time || '17:00',
+          deadline_days: task.deadline_days || '',
+          task_type: task.task_type || 'DAILY',
+          est_time: task.est_time || 0
         }, {
           onConflict: 'task_id,todo_date'
         });
 
       if (logErr) throw logErr;
 
-      // 2. Also map subtasks to DONE
-      await Promise.all((task.sub_tasks || []).map(async (sub) => {
-        await supabase
-          .from('subtask_logs')
-          .upsert({
-            subtask_id: sub.id,
-            task_id: task.id,
-            todo_date: task.todo_date,
-            status: 'DONE',
-            is_completed: true,
-            completed_by: updaterName,
-            team_name: sub.team_name || ''
-          }, {
-            onConflict: 'subtask_id,todo_date'
-          });
-      }));
-
-      // 3. Update dailyTasks locally in useAppStore
+      // 5. Update dailyTasks locally in useAppStore
       useAppStore.setState(state => {
         const nextDailyTasks = state.dailyTasks.map(t => {
           if (t.id === task.id) {
@@ -926,8 +1202,15 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             const taskLogPayload = {
               task_id: task.id,
               todo_date: task.todo_date,
-              status: 'DONE',
-              updated_by: updaterName
+              status: newStatus,
+              updated_by: updaterName,
+              title: task.title || '',
+              project_name: task.project_name || '',
+              tag_name: task.tag_name || '',
+              deadline_time: task.deadline_time || '17:00',
+              deadline_days: task.deadline_days || '',
+              task_type: task.task_type || 'DAILY',
+              est_time: task.est_time || 0
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -937,27 +1220,35 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
             // Subtasks Logs Update
             const nextSubtasks = (t.subtasks || []).map((subItem: any) => {
-              const subLogs = [...(subItem.subtask_logs || [])];
-              const subLogIndex = subLogs.findIndex((sl: any) => sl.todo_date === task.todo_date);
-              const subLogPayload = {
-                subtask_id: subItem.id,
-                task_id: task.id,
-                todo_date: task.todo_date,
-                status: 'DONE',
-                is_completed: true,
-                completed_by: updaterName
-              };
-              if (subLogIndex >= 0) {
-                subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
-              } else {
-                subLogs.push(subLogPayload);
+              const matchedSub = subtaskLogsToSave.find(s => s.subtask_id === subItem.id);
+              if (matchedSub) {
+                const subLogs = [...(subItem.subtask_logs || [])];
+                const subLogIndex = subLogs.findIndex((sl: any) => sl.todo_date === task.todo_date);
+                if (subLogIndex >= 0) {
+                  subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...matchedSub };
+                } else {
+                  subLogs.push(matchedSub);
+                }
+                return { ...subItem, subtask_logs: subLogs };
               }
-              return { ...subItem, subtask_logs: subLogs };
+              return subItem;
+            });
+
+            // Update subtask_logs field at parent task level
+            const nextGlobalSubLogs = [...(t.subtask_logs || [])];
+            subtaskLogsToSave.forEach(subPayload => {
+              const slIdx = nextGlobalSubLogs.findIndex(sl => sl.subtask_id === subPayload.subtask_id && sl.todo_date === task.todo_date);
+              if (slIdx >= 0) {
+                nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...subPayload };
+              } else {
+                nextGlobalSubLogs.push(subPayload);
+              }
             });
 
             return {
               ...t,
               task_logs: logs,
+              subtask_logs: nextGlobalSubLogs,
               subtasks: nextSubtasks
             };
           }
@@ -970,7 +1261,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         setOpenedTask(null);
       }
 
-      await logger.log('SUBMIT_TASK', `Submitted task [${getDisplayId(task)}]: ${task.title || 'Untitled'} (${task.todo_date})`, { taskId: task.id, finalStatus: 'DONE' });
+      await logger.log('SUBMIT_TASK', `Submitted task [${getDisplayId(task)}]: ${task.title || 'Untitled'} (${task.todo_date})`, { taskId: task.id, finalStatus: newStatus });
+      await checkAndToggleOnetimeTemplateStatus(task.id);
       toast.success('Task completed successfully!');
     } catch (err: any) {
       console.error('Error submitting task:', err);
@@ -987,36 +1279,56 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     }
 
     try {
-      // 1. Delete or upsert task log to NEW/NULL
+      // 1. Update task log to NEW and actual_minutes to 0
       const { error: logErr } = await supabase
         .from('task_logs')
-        .delete()
+        .update({ status: 'NEW', actual_minutes: 0 })
         .eq('task_id', task.id)
         .eq('todo_date', task.todo_date);
 
       if (logErr) throw logErr;
 
-      // 2. Delete all subtask logs for this date
-      await Promise.all((task.sub_tasks || []).map(async (sub) => {
-        await supabase
-          .from('subtask_logs')
-          .delete()
-          .eq('subtask_id', sub.id)
-          .eq('todo_date', task.todo_date);
-      }));
+      // 2. Update subtask logs to NEW, is_completed = false, actual_minutes = 0
+      const { error: subLogsErr } = await supabase
+        .from('subtask_logs')
+        .update({ status: 'NEW', is_completed: false, actual_minutes: 0 })
+        .eq('task_id', task.id)
+        .eq('todo_date', task.todo_date);
 
-      // 3. Update dailyTasks locally in useAppStore (delete logs from array)
+      if (subLogsErr) throw subLogsErr;
+
+      // 3. Update dailyTasks locally in useAppStore (update logs instead of deleting them)
       useAppStore.setState(state => {
         const nextDailyTasks = state.dailyTasks.map(t => {
           if (t.id === task.id) {
-            const logs = (t.task_logs || []).filter((l: any) => l.todo_date !== task.todo_date);
+            const logs = (t.task_logs || []).map((l: any) => {
+              if (l.todo_date === task.todo_date) {
+                return { ...l, status: 'NEW', actual_minutes: 0 };
+              }
+              return l;
+            });
+            
+            const globalSubLogs = (t.subtask_logs || []).map((sl: any) => {
+              if (sl.todo_date === task.todo_date) {
+                return { ...sl, status: 'NEW', is_completed: false, actual_minutes: 0 };
+              }
+              return sl;
+            });
+
             const nextSubtasks = (t.subtasks || []).map((subItem: any) => {
-              const subLogs = (subItem.subtask_logs || []).filter((sl: any) => sl.todo_date !== task.todo_date);
+              const subLogs = (subItem.subtask_logs || []).map((sl: any) => {
+                if (sl.todo_date === task.todo_date) {
+                  return { ...sl, status: 'NEW', is_completed: false, actual_minutes: 0 };
+                }
+                return sl;
+              });
               return { ...subItem, subtask_logs: subLogs };
             });
+
             return {
               ...t,
               task_logs: logs,
+              subtask_logs: globalSubLogs,
               subtasks: nextSubtasks
             };
           }
@@ -1028,11 +1340,17 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       if (openedTask && openedTask.id === task.id && openedTask.todo_date === task.todo_date) {
         setOpenedTask({
           ...openedTask,
-          todo_status: 'NEW'
+          todo_status: 'NEW',
+          sub_tasks: (openedTask.sub_tasks || []).map(st => ({
+            ...st,
+            sub_status: 'New',
+            actual_minutes: 0
+          }))
         });
       }
 
       await logger.log('RESET_TASK', `Reset task status [${getDisplayId(task)}]: ${task.title || 'Untitled'} (${task.todo_date})`, { taskId: task.id });
+      await checkAndToggleOnetimeTemplateStatus(task.id);
       toast.success('Task reset successfully!');
     } catch (err: any) {
       console.error('Error resetting task:', err);
@@ -1052,7 +1370,14 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           task_id: task.id,
           todo_date: task.todo_date,
           status: 'SKIPPED',
-          updated_by: updaterName
+          updated_by: updaterName,
+          title: task.title || '',
+          project_name: task.project_name || '',
+          tag_name: task.tag_name || '',
+          deadline_time: task.deadline_time || '17:00',
+          deadline_days: task.deadline_days || '',
+          task_type: task.task_type || 'DAILY',
+          est_time: task.est_time || 0
         }, {
           onConflict: 'task_id,todo_date'
         });
@@ -1070,7 +1395,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             status: 'SKIPPED',
             is_completed: false,
             completed_by: updaterName,
-            team_name: sub.team_name || ''
+            team_name: sub.team_name || '',
+            content: sub.content || sub.name || '',
+            assignee: sub.assignee || '',
+            estimated_minutes: sub.estimated_minutes || 0
           }, {
             onConflict: 'subtask_id,todo_date'
           });
@@ -1087,7 +1415,14 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               task_id: task.id,
               todo_date: task.todo_date,
               status: 'SKIPPED',
-              updated_by: updaterName
+              updated_by: updaterName,
+              title: task.title || '',
+              project_name: task.project_name || '',
+              tag_name: task.tag_name || '',
+              deadline_time: task.deadline_time || '17:00',
+              deadline_days: task.deadline_days || '',
+              task_type: task.task_type || 'DAILY',
+              est_time: task.est_time || 0
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -1105,7 +1440,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 todo_date: task.todo_date,
                 status: 'SKIPPED',
                 is_completed: false,
-                completed_by: updaterName
+                completed_by: updaterName,
+                content: subItem.content || subItem.name || '',
+                assignee: subItem.assignee || '',
+                estimated_minutes: subItem.estimated_minutes || 0
               };
               if (subLogIndex >= 0) {
                 subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -1115,9 +1453,32 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               return { ...subItem, subtask_logs: subLogs };
             });
 
+            // Update subtask_logs field at parent task level
+            const nextGlobalSubLogs = [...(t.subtask_logs || [])];
+            (task.sub_tasks || []).forEach(sub => {
+              const slIdx = nextGlobalSubLogs.findIndex(sl => sl.subtask_id === sub.id && sl.todo_date === task.todo_date);
+              const payload = {
+                subtask_id: sub.id,
+                task_id: task.id,
+                todo_date: task.todo_date,
+                status: 'SKIPPED',
+                is_completed: false,
+                completed_by: updaterName,
+                content: sub.content || sub.name || '',
+                assignee: sub.assignee || '',
+                estimated_minutes: sub.estimated_minutes || 0
+              };
+              if (slIdx >= 0) {
+                nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
+              } else {
+                nextGlobalSubLogs.push(payload);
+              }
+            });
+
             return {
               ...t,
               task_logs: logs,
+              subtask_logs: nextGlobalSubLogs,
               subtasks: nextSubtasks
             };
           }
@@ -1134,6 +1495,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       }
 
       await logger.log('SKIP_TASK', `Skipped task [${getDisplayId(task)}]: ${task.title || 'Untitled'} (${task.todo_date})`, { taskId: task.id });
+      await checkAndToggleOnetimeTemplateStatus(task.id);
       toast.success('Task skipped successfully!');
     } catch (err: any) {
       console.error('Error skipping task:', err);
@@ -1199,7 +1561,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             status: statusUpper,
             is_completed: isCompleted,
             completed_by: completedBy,
-            team_name: sub.team_name || ''
+            team_name: sub.team_name || '',
+            content: sub.content || sub.name || '',
+            assignee: sub.assignee || '',
+            estimated_minutes: sub.estimated_minutes || 0
           }, {
             onConflict: 'subtask_id,todo_date'
           });
@@ -1217,7 +1582,14 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           task_id: taskToSave.id,
           todo_date: taskToSave.todo_date,
           status: newStatus,
-          updated_by: completedBy
+          updated_by: completedBy,
+          title: taskToSave.title || '',
+          project_name: taskToSave.project_name || '',
+          tag_name: taskToSave.tag_name || '',
+          deadline_time: taskToSave.deadline_time || '17:00',
+          deadline_days: taskToSave.deadline_days || '',
+          task_type: taskToSave.task_type || 'DAILY',
+          est_time: taskToSave.est_time || 0
         }, {
           onConflict: 'task_id,todo_date'
         });
@@ -1233,7 +1605,14 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               task_id: taskToSave.id,
               todo_date: taskToSave.todo_date,
               status: newStatus,
-              updated_by: completedBy
+              updated_by: completedBy,
+              title: taskToSave.title || '',
+              project_name: taskToSave.project_name || '',
+              tag_name: taskToSave.tag_name || '',
+              deadline_time: taskToSave.deadline_time || '17:00',
+              deadline_days: taskToSave.deadline_days || '',
+              task_type: taskToSave.task_type || 'DAILY',
+              est_time: taskToSave.est_time || 0
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -1253,7 +1632,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   todo_date: taskToSave.todo_date,
                   status: (matchingSubToSave.sub_status || 'New').toUpperCase(),
                   is_completed: matchingSubToSave.sub_status === 'Done',
-                  completed_by: completedBy
+                  completed_by: completedBy,
+                  content: matchingSubToSave.content || matchingSubToSave.name || '',
+                  assignee: matchingSubToSave.assignee || '',
+                  estimated_minutes: matchingSubToSave.estimated_minutes || 0
                 };
                 if (subLogIndex >= 0) {
                   subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -1268,9 +1650,32 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               return subItem;
             });
 
+            // Update subtask_logs field at parent task level
+            const nextGlobalSubLogs = [...(t.subtask_logs || [])];
+            (taskToSave.sub_tasks || []).forEach(sub => {
+              const slIdx = nextGlobalSubLogs.findIndex(sl => sl.subtask_id === sub.id && sl.todo_date === taskToSave.todo_date);
+              const payload = {
+                subtask_id: sub.id,
+                task_id: taskToSave.id,
+                todo_date: taskToSave.todo_date,
+                status: (sub.sub_status || 'New').toUpperCase(),
+                is_completed: sub.sub_status === 'Done',
+                completed_by: completedBy,
+                content: sub.content || sub.name || '',
+                assignee: sub.assignee || '',
+                estimated_minutes: sub.estimated_minutes || 0
+              };
+              if (slIdx >= 0) {
+                nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
+              } else {
+                nextGlobalSubLogs.push(payload);
+              }
+            });
+
             return {
               ...t,
               task_logs: logs,
+              subtask_logs: nextGlobalSubLogs,
               subtasks: nextSubtasks
             };
           }
@@ -1279,6 +1684,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         return { dailyTasks: nextDailyTasks };
       });
 
+      await checkAndToggleOnetimeTemplateStatus(taskToSave.id);
       toast.success('Changes saved successfully!');
     } catch (err: any) {
       console.error('Error saving task edits on close:', err);
@@ -1358,7 +1764,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       }
 
       // 6.5. Task Type filter
-      if (filterTaskType && (task.task_type || '').toUpperCase() !== filterTaskType.toUpperCase()) return false;
+      if (selectedTaskTypes.length > 0) {
+        if (!selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return false;
+      }
 
       // 7. Date Filter (matched to todo_date or creation date boundary)
       if (startDate && endDate) {
@@ -1506,6 +1914,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       const subLogsToUpsert: any[] = [];
 
       const updatedIdsMap: Record<string, string> = {};
+      const updatedTasksObjects: Record<string, VirtualTask> = {};
 
       for (const virtualId of selectedTaskIds) {
         const taskObj = virtualTasks.find(t => t.virtual_id === virtualId);
@@ -1515,7 +1924,15 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           task_id: taskObj.id,
           todo_date: taskObj.todo_date,
           status: 'SKIPPED',
-          updated_by: updaterName
+          updated_by: updaterName,
+          title: taskObj.title || '',
+          project_name: taskObj.project_name || '',
+          tag_name: taskObj.tag_name || '',
+          deadline_time: taskObj.deadline_time || '17:00',
+          deadline_days: taskObj.deadline_days || '',
+          task_type: taskObj.task_type || 'DAILY',
+          est_time: taskObj.est_time || 0,
+          actual_minutes: 0
         });
 
         (taskObj.sub_tasks || []).forEach(sub => {
@@ -1526,11 +1943,16 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             status: 'SKIPPED',
             is_completed: false,
             completed_by: updaterName,
-            team_name: sub.team_name || ''
+            team_name: sub.team_name || '',
+            content: sub.content || sub.name || '',
+            assignee: sub.assignee || '',
+            estimated_minutes: sub.estimated_minutes || 0,
+            actual_minutes: 0
           });
         });
 
         updatedIdsMap[taskObj.id] = taskObj.todo_date;
+        updatedTasksObjects[taskObj.id] = taskObj;
       }
 
       // 1. Bulk Upsert Task Logs
@@ -1553,7 +1975,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       useAppStore.setState(state => {
         const nextDailyTasks = state.dailyTasks.map(t => {
           const targetTodoDate = updatedIdsMap[t.id];
-          if (targetTodoDate) {
+          const originTaskObj = updatedTasksObjects[t.id];
+          if (targetTodoDate && originTaskObj) {
             // Task Log payload update
             const logs = [...(t.task_logs || [])];
             const existingLogIndex = logs.findIndex((l: any) => l.todo_date === targetTodoDate);
@@ -1561,7 +1984,15 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               task_id: t.id,
               todo_date: targetTodoDate,
               status: 'SKIPPED',
-              updated_by: updaterName
+              updated_by: updaterName,
+              title: originTaskObj.title || '',
+              project_name: originTaskObj.project_name || '',
+              tag_name: originTaskObj.tag_name || '',
+              deadline_time: originTaskObj.deadline_time || '17:00',
+              deadline_days: originTaskObj.deadline_days || '',
+              task_type: originTaskObj.task_type || 'DAILY',
+              est_time: originTaskObj.est_time || 0,
+              actual_minutes: 0
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -1579,7 +2010,11 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 todo_date: targetTodoDate,
                 status: 'SKIPPED',
                 is_completed: false,
-                completed_by: updaterName
+                completed_by: updaterName,
+                content: subItem.content || subItem.name || '',
+                assignee: subItem.assignee || '',
+                estimated_minutes: subItem.estimated_minutes || 0,
+                actual_minutes: 0
               };
               if (subLogIndex >= 0) {
                 subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -1589,9 +2024,33 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               return { ...subItem, subtask_logs: subLogs };
             });
 
+            // Update subtask_logs field at parent task level
+            const nextGlobalSubLogs = [...(t.subtask_logs || [])];
+            (originTaskObj.sub_tasks || []).forEach(sub => {
+              const slIdx = nextGlobalSubLogs.findIndex(sl => sl.subtask_id === sub.id && sl.todo_date === targetTodoDate);
+              const payload = {
+                subtask_id: sub.id,
+                task_id: t.id,
+                todo_date: targetTodoDate,
+                status: 'SKIPPED',
+                is_completed: false,
+                completed_by: updaterName,
+                content: sub.content || sub.name || '',
+                assignee: sub.assignee || '',
+                estimated_minutes: sub.estimated_minutes || 0,
+                actual_minutes: 0
+              };
+              if (slIdx >= 0) {
+                nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
+              } else {
+                nextGlobalSubLogs.push(payload);
+              }
+            });
+
             return {
               ...t,
               task_logs: logs,
+              subtask_logs: nextGlobalSubLogs,
               subtasks: nextSubtasks
             };
           }
@@ -1605,6 +2064,11 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           ...openedTask,
           todo_status: 'SKIPPED'
         });
+      }
+
+      const uniqueTaskIds = Array.from(new Set(Array.from(selectedTaskIds).map(vid => String(vid).split('_')[0])));
+      for (const tId of uniqueTaskIds) {
+        await checkAndToggleOnetimeTemplateStatus(tId);
       }
 
       toast.success(`Successfully skipped ${selectedTaskIds.size} tasks!`);
@@ -1634,19 +2098,34 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       const subLogsToUpsert: any[] = [];
 
       const updatedIdsMap: Record<string, string> = {};
+      const updatedTasksObjects: Record<string, VirtualTask> = {};
 
       for (const virtualId of selectedTaskIds) {
         const taskObj = virtualTasks.find(t => t.virtual_id === virtualId);
         if (!taskObj) continue;
 
+        const calculatedActual = taskObj.sub_tasks?.reduce(
+          (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || s.estimated_minutes || 0) : (s.estimated_minutes || 0)),
+          0
+        ) || taskObj.est_time || 0;
+
         logsToUpsert.push({
           task_id: taskObj.id,
           todo_date: taskObj.todo_date,
           status: 'DONE',
-          updated_by: updaterName
+          updated_by: updaterName,
+          title: taskObj.title || '',
+          project_name: taskObj.project_name || '',
+          tag_name: taskObj.tag_name || '',
+          deadline_time: taskObj.deadline_time || '17:00',
+          deadline_days: taskObj.deadline_days || '',
+          task_type: taskObj.task_type || 'DAILY',
+          est_time: taskObj.est_time || 0,
+          actual_minutes: calculatedActual
         });
 
         (taskObj.sub_tasks || []).forEach(sub => {
+          const am = sub.actual_minutes !== undefined && sub.actual_minutes !== 0 ? sub.actual_minutes : sub.estimated_minutes;
           subLogsToUpsert.push({
             subtask_id: sub.id,
             task_id: taskObj.id,
@@ -1654,11 +2133,16 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             status: 'DONE',
             is_completed: true,
             completed_by: updaterName,
-            team_name: sub.team_name || ''
+            team_name: sub.team_name || '',
+            content: sub.content || sub.name || '',
+            assignee: sub.assignee || '',
+            estimated_minutes: sub.estimated_minutes || 0,
+            actual_minutes: am || 0
           });
         });
 
         updatedIdsMap[taskObj.id] = taskObj.todo_date;
+        updatedTasksObjects[taskObj.id] = taskObj;
       }
 
       // 1. Bulk Upsert Task Logs
@@ -1681,15 +2165,29 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       useAppStore.setState(state => {
         const nextDailyTasks = state.dailyTasks.map(t => {
           const targetTodoDate = updatedIdsMap[t.id];
-          if (targetTodoDate) {
+          const originTaskObj = updatedTasksObjects[t.id];
+          if (targetTodoDate && originTaskObj) {
             // Task Log payload update
             const logs = [...(t.task_logs || [])];
             const existingLogIndex = logs.findIndex((l: any) => l.todo_date === targetTodoDate);
+            const calculatedActual = originTaskObj.sub_tasks?.reduce(
+              (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || s.estimated_minutes || 0) : (s.estimated_minutes || 0)),
+              0
+            ) || originTaskObj.est_time || 0;
+
             const taskLogPayload = {
               task_id: t.id,
               todo_date: targetTodoDate,
               status: 'DONE',
-              updated_by: updaterName
+              updated_by: updaterName,
+              title: originTaskObj.title || '',
+              project_name: originTaskObj.project_name || '',
+              tag_name: originTaskObj.tag_name || '',
+              deadline_time: originTaskObj.deadline_time || '17:00',
+              deadline_days: originTaskObj.deadline_days || '',
+              task_type: originTaskObj.task_type || 'DAILY',
+              est_time: originTaskObj.est_time || 0,
+              actual_minutes: calculatedActual
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -1701,13 +2199,20 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             const nextSubtasks = (t.subtasks || []).map((subItem: any) => {
               const subLogs = [...(subItem.subtask_logs || [])];
               const subLogIndex = subLogs.findIndex((sl: any) => sl.todo_date === targetTodoDate);
+              const originSub = originTaskObj.sub_tasks?.find(s => s.id === subItem.id);
+              const am = originSub ? (originSub.actual_minutes !== undefined && originSub.actual_minutes !== 0 ? originSub.actual_minutes : originSub.estimated_minutes) : subItem.estimated_minutes;
+
               const subLogPayload = {
                 subtask_id: subItem.id,
                 task_id: t.id,
                 todo_date: targetTodoDate,
                 status: 'DONE',
                 is_completed: true,
-                completed_by: updaterName
+                completed_by: updaterName,
+                content: subItem.content || subItem.name || '',
+                assignee: subItem.assignee || '',
+                estimated_minutes: subItem.estimated_minutes || 0,
+                actual_minutes: am || 0
               };
               if (subLogIndex >= 0) {
                 subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -1717,9 +2222,34 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               return { ...subItem, subtask_logs: subLogs };
             });
 
+            // Update subtask_logs field at parent task level
+            const nextGlobalSubLogs = [...(t.subtask_logs || [])];
+            (originTaskObj.sub_tasks || []).forEach(sub => {
+              const slIdx = nextGlobalSubLogs.findIndex(sl => sl.subtask_id === sub.id && sl.todo_date === targetTodoDate);
+              const am = sub.actual_minutes !== undefined && sub.actual_minutes !== 0 ? sub.actual_minutes : sub.estimated_minutes;
+              const payload = {
+                subtask_id: sub.id,
+                task_id: t.id,
+                todo_date: targetTodoDate,
+                status: 'DONE',
+                is_completed: true,
+                completed_by: updaterName,
+                content: sub.content || sub.name || '',
+                assignee: sub.assignee || '',
+                estimated_minutes: sub.estimated_minutes || 0,
+                actual_minutes: am || 0
+              };
+              if (slIdx >= 0) {
+                nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
+              } else {
+                nextGlobalSubLogs.push(payload);
+              }
+            });
+
             return {
               ...t,
               task_logs: logs,
+              subtask_logs: nextGlobalSubLogs,
               subtasks: nextSubtasks
             };
           }
@@ -1733,6 +2263,11 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           ...openedTask,
           todo_status: 'DONE'
         });
+      }
+
+      const uniqueTaskIds = Array.from(new Set(Array.from(selectedTaskIds).map(vid => String(vid).split('_')[0])));
+      for (const tId of uniqueTaskIds) {
+        await checkAndToggleOnetimeTemplateStatus(tId);
       }
 
       toast.success(`Successfully completed ${selectedTaskIds.size} tasks!`);
@@ -1850,7 +2385,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           />
 
           {/* Task Type Filter */}
-          <FilterSelect
+          <MultiTeamFilterSelect
             value={filterTaskType}
             onChange={(val) => {
               setFilterTaskType(val);

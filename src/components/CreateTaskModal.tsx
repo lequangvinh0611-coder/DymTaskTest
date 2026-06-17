@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore';
 import { logger } from '../lib/logger';
 import { SearchableFilterSelect } from './ui/SearchableFilterSelect';
 import { DateRangePicker } from './ui/DateRangePicker';
+import { useAppStore } from '../types';
 
 const getDatesInRange = (startDate: string, endDate: string): string[] => {
   if (!startDate) return [];
@@ -26,6 +27,23 @@ const getDatesInRange = (startDate: string, endDate: string): string[] => {
     current.setDate(current.getDate() + 1);
   }
   return dates;
+};
+
+const getTodayDateString = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getYesterdayDateString = (todayStr: string): string => {
+  const d = new Date(todayStr);
+  d.setDate(d.getDate() - 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 // Helpers to detect or prevent emoji and icon characters (Option 2)
@@ -183,6 +201,15 @@ const serializeTaskDescription = (metadata: TaskMetadata): any => {
 const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSuccess, taskToEdit, taskToClone }) => {
   const { profile } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  const [showScopeDialog, setShowScopeDialog] = useState(false);
+  const [scopeDialogData, setScopeDialogData] = useState<{
+    isRecurring: boolean;
+    isScheduledToday: boolean;
+    isOnetimeMultiDay: boolean;
+    onetimeDaysCount: number;
+    firstDate?: string;
+    lastDate?: string;
+  } | null>(null);
   const isEditMode = !!taskToEdit;
 
   const [masterData, setMasterData] = useState<{
@@ -472,106 +499,72 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
     return masterData.assignees.map(name => ({ value: name, label: name }));
   }, [masterData.assignees]);
 
-  // Form submit callback handler
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const isUnchanged = useMemo(() => {
+    if (!taskToEdit) return false;
 
-    if (!taskName.trim()) {
-      toast.warning('Please enter the Task Name.');
-      return;
-    }
-    if (hasEmoji(taskName)) {
-      toast.warning('Task Name cannot contain emojis or icons.');
-      return;
-    }
-    if (!project) {
-      toast.warning('Please select a Project.');
-      return;
-    }
-    if (!tag) {
-      toast.warning('Please select a Tag.');
-      return;
-    }
-    if (!taskType) {
-      toast.warning('Please select a Task Type.');
-      return;
-    }
-    if (!note.trim()) {
-      toast.warning('Please enter the Note (cannot be empty).');
-      return;
-    }
-    if (!containsLink(note)) {
-      toast.warning('Note must contain a valid URL/link (e.g. http://, https:// or www.).');
-      return;
-    }
-    if (hasEmoji(note)) {
-      toast.warning('Note cannot contain emojis or icons.');
-      return;
-    }
-    if (!deadlineTime24h) {
-      toast.warning('Please select a Deadline time.');
-      return;
-    }
-    if (taskType === 'WEEKLY' && selectedDays.length === 0) {
-      toast.warning('Please select at least one Repeat day.');
-      return;
-    }
-    if (taskType === 'MONTHLY') {
-      if (!monthlyDays.trim()) {
-        toast.warning('Please enter the Monthly repeat days.');
-        return;
-      }
-      const clean = monthlyDays.trim();
-      const parts = clean.split(/[\s,]+/).map(p => p.trim()).filter(p => p.length > 0);
-      if (parts.length === 0) {
-        toast.warning('Monthly repeat days must contain at least one day number.');
-        return;
-      }
-      for (const part of parts) {
-        if (!/^\d+$/.test(part)) {
-          toast.warning('Monthly repeat days must contain only numbers between 1 and 31 separated by commas or spaces (no letters or indicators allowed).');
-          return;
-        }
-        const num = parseInt(part, 10);
-        if (num < 1 || num > 31) {
-          toast.warning(`Invalid monthly repeat day: ${part}. Days must be between 1 and 31.`);
-          return;
-        }
-      }
-    }
-    if (taskType === 'ONETIME') {
-      if (!onetimeStartDate) {
-        toast.warning('Please select a Deadline date.');
-        return;
-      }
-      if (onetimeTargets.length === 0) {
-        toast.warning('Please select a valid date range.');
-        return;
-      }
-    }
-    if (subTasks.length === 0) {
-      toast.warning('Please add at least one sub-task.');
-      return;
-    }
-    for (const sub of subTasks) {
-      if (!sub.content.trim()) {
-        toast.warning('Sub-task content cannot be empty.');
-        return;
-      }
-      if (hasEmoji(sub.content)) {
-        toast.warning('Sub-task content cannot contain emojis or icons.');
-        return;
-      }
-      if (!sub.assignee) {
-        toast.warning('Sub-task assignee cannot be empty.');
-        return;
-      }
-      if (sub.estimated_minutes !== undefined && sub.estimated_minutes < 0) {
-        toast.warning('Estimated time for the sub-task cannot be negative.');
-        return;
-      }
-    }
+    const meta = parseTaskDescription(taskToEdit.description);
+    
+    const projName = (taskToEdit as any).projects?.name || meta.project_name || '';
+    const tagName = (taskToEdit as any).tags?.name || meta.tag_name || '';
+    const teamName = (taskToEdit as any).teams?.name || meta.team_name || '';
+    const dbNote = taskToEdit.description && !taskToEdit.description.startsWith('{') ? taskToEdit.description : (meta.note || '');
 
+    if (taskName.trim().toLowerCase() !== (taskToEdit.title || (taskToEdit as any).task_name || '').trim().toLowerCase()) return false;
+    if (project !== projName) return false;
+    if (team !== teamName) return false;
+    if (tag !== tagName) return false;
+    if (taskType !== (taskToEdit.task_type || (taskToEdit as any).type || '')) return false;
+    if (note.trim().toLowerCase() !== dbNote.trim().toLowerCase()) return false;
+    
+    const currentDeadlineTime = (taskToEdit as any).deadline_time || '';
+    const sourceTime24 = currentDeadlineTime ? convertTo24h(currentDeadlineTime) : '';
+    if (deadlineTime24h !== sourceTime24) return false;
+    
+    const daysInput = (taskToEdit as any).deadline_days;
+    const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : (daysInput || '');
+
+    if (taskType === 'WEEKLY') {
+      const sourceDays = daysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
+      const isWeeklyEqual = selectedDays.length === sourceDays.length && selectedDays.every((d, i) => d === sourceDays[i]);
+      if (!isWeeklyEqual) return false;
+    } else if (taskType === 'MONTHLY') {
+      if (monthlyDays.trim() !== daysStr.trim()) return false;
+    } else if (taskType === 'ONETIME') {
+      const dates = daysStr.includes('~') ? daysStr.split('~').map(d => d.trim()) : [daysStr.trim()];
+      const sourceStart = dates[0] || '';
+      const sourceEnd = dates[1] || dates[0] || '';
+      if (onetimeStartDate !== sourceStart || onetimeEndDate !== sourceEnd) return false;
+    }
+    
+    const sourceSubtasks = taskToEdit.subtasks || [];
+    if (subTasks.length !== sourceSubtasks.length) return false;
+    const isSubtasksEqual = subTasks.every((st, idx) => {
+      const orig = sourceSubtasks[idx];
+      if (!orig) return false;
+      return st.content.trim().toLowerCase() === (orig.content || '').trim().toLowerCase() &&
+             st.assignee === orig.assignee &&
+             Number(st.estimated_minutes) === Number(orig.estimated_minutes);
+    });
+    if (!isSubtasksEqual) return false;
+
+    return true;
+  }, [
+    taskToEdit,
+    taskName,
+    project,
+    team,
+    tag,
+    taskType,
+    note,
+    deadlineTime24h,
+    selectedDays,
+    monthlyDays,
+    onetimeStartDate,
+    onetimeEndDate,
+    subTasks
+  ]);
+
+  const executeSave = async (scope: 'FUTURE' | 'TODAY_ONLY') => {
     setLoading(true);
     try {
       // Find UUID relations from Master Data safely
@@ -602,30 +595,15 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
 
       const formattedDeadlineTime = convertToDisplayTime(taskType === 'ONETIME' ? (sortedTargets[0]?.time || '17:00') : deadlineTime24h);
 
-      const getTodayDateString = (): string => {
-        const d = new Date();
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-
-      const getYesterdayDateString = (todayStr: string): string => {
-        const d = new Date(todayStr);
-        d.setDate(d.getDate() - 1);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-
       const todayStr = getTodayDateString();
       const yesterdayStr = getYesterdayDateString(todayStr);
 
       const oldMeta: any = isEditMode && taskToEdit ? parseTaskDescription(taskToEdit.description) : null;
       let updatedVersions = oldMeta?.versions || [];
 
-      if (isEditMode && taskToEdit && oldMeta) {
+      const updaterName = profile?.name || profile?.email || 'System';
+
+      if (isEditMode && taskToEdit && oldMeta && taskType !== 'ONETIME' && scope === 'FUTURE') {
         const current_valid_from = oldMeta.last_updated_at
           ? oldMeta.last_updated_at.split('T')[0]
           : (taskToEdit.created_at ? taskToEdit.created_at.split('T')[0] : todayStr);
@@ -635,14 +613,14 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
             valid_from: current_valid_from,
             valid_until: yesterdayStr,
             title: taskToEdit.title,
-            description: oldMeta.description || '',
+            description: oldMeta.note || '',
             project_name: oldMeta.project_name,
             team_name: oldMeta.team_name,
             tag_name: oldMeta.tag_name,
-            deadline_time: oldMeta.deadline_time,
-            deadline_days: oldMeta.deadline_days,
-            est_time: taskToEdit.est_time,
-            sub_tasks: oldMeta.sub_tasks || []
+            deadline_time: oldMeta.deadline_time || taskToEdit.deadline_time,
+            deadline_days: oldMeta.deadline_days || taskToEdit.deadline_days,
+            est_time: taskToEdit.est_time || taskToEdit.estimated_minutes,
+            sub_tasks: taskToEdit.subtasks || []
           };
           updatedVersions = [...updatedVersions, oldVersion];
         }
@@ -722,18 +700,24 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         ? (mappedOnetimeTargets?.some(t => t.todo_status === 'NEW'))
         : true;
 
-      // Clean metadata payload - contains only 4 static properties as requested
-      const metadataForDb = {
-        project_name: project,
-        team_name: team,
-        tag_name: tag,
-        note: note.trim()
-      };
+      // Serialization description holding clean note AND versions if we have historical versions
+      let descriptionValue = note.trim();
+      if (updatedVersions && updatedVersions.length > 0) {
+        descriptionValue = JSON.stringify({
+          project_name: project,
+          team_name: team,
+          tag_name: tag,
+          note: note.trim(),
+          versions: updatedVersions,
+          last_updated_at: new Date().toISOString(),
+          last_updated_by: updaterName
+        });
+      }
 
       // Construct compliant RDBMS payload with matching properties for schema compatibility
       const payload = {
         title: taskName.trim(),
-        description: note.trim(), // description now holds clean note
+        description: descriptionValue,
         task_type: taskType,
         est_time: totalEstMinutes,
         status: hasUnfinishedTarget ? 'ON' : 'OFF',
@@ -745,7 +729,105 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         deadline_days: computedDeadlineDays
       };
 
-      if (isEditMode && taskToEdit) {
+      if (isEditMode && taskToEdit && taskType !== 'ONETIME' && scope === 'TODAY_ONLY') {
+        // --- 1. ONLY UPDATE TODAY'S LOGS (Chỉ áp dụng duy nhất cho ngày hôm nay) ---
+        // Fetch existing task log for today to check status/or other things.
+        const { data: existingLog, error: fetchLogErr } = await supabase
+          .from('task_logs')
+          .select('*')
+          .eq('task_id', taskToEdit.id)
+          .eq('todo_date', todayStr)
+          .maybeSingle();
+
+        if (fetchLogErr) throw fetchLogErr;
+
+        const taskLogStatus = existingLog ? (existingLog.status || 'NEW') : 'NEW';
+
+        const taskLogPayload = {
+          task_id: taskToEdit.id,
+          todo_date: todayStr,
+          status: taskLogStatus,
+          title: taskName.trim(),
+          project_name: project || '',
+          tag_name: tag || '',
+          deadline_time: deadlineTime24h ? (deadlineTime24h.includes(':') && deadlineTime24h.split(':').length === 2 ? `${deadlineTime24h}:00` : deadlineTime24h) : null,
+          deadline_days: computedDeadlineDays,
+          task_type: taskType,
+          est_time: totalEstMinutes,
+          updated_by: updaterName,
+          actual_minutes: existingLog ? (existingLog.actual_minutes || 0) : 0
+        };
+
+        // Upsert the task log
+        const { error: logUpsertErr } = await supabase
+          .from('task_logs')
+          .upsert(taskLogPayload, { onConflict: 'task_id, todo_date' });
+
+        if (logUpsertErr) throw logUpsertErr;
+
+        // Fetch existing subtask logs for today to map completion state
+        const { data: dbSubtaskLogs, error: subLogsFetchErr } = await supabase
+          .from('subtask_logs')
+          .select('*')
+          .eq('task_id', taskToEdit.id)
+          .eq('todo_date', todayStr);
+
+        if (subLogsFetchErr) throw subLogsFetchErr;
+
+        // Delete old subtask logs for today
+        const { error: subLogsDeleteErr } = await supabase
+          .from('subtask_logs')
+          .delete()
+          .eq('task_id', taskToEdit.id)
+          .eq('todo_date', todayStr);
+
+        if (subLogsDeleteErr) throw subLogsDeleteErr;
+
+        // Build and insert new subtask logs
+        const subtaskLogsToInsert = subTasks.map((st: any) => {
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(st.id);
+          const subtaskId = isUuid ? st.id : null;
+
+          // Try to match with existing log
+          const matchedLog = dbSubtaskLogs?.find((l: any) => 
+            (subtaskId && l.subtask_id === subtaskId) || l.content === st.content
+          );
+
+          return {
+            task_id: taskToEdit.id,
+            subtask_id: subtaskId,
+            todo_date: todayStr,
+            content: st.content,
+            assignee: st.assignee,
+            estimated_minutes: st.estimated_minutes,
+            team_name: team || '',
+            is_completed: matchedLog ? matchedLog.is_completed : false,
+            status: matchedLog ? (matchedLog.status || 'NEW') : 'NEW',
+            completed_by: matchedLog ? matchedLog.completed_by : null,
+            actual_minutes: matchedLog ? (matchedLog.actual_minutes || 0) : 0
+          };
+        });
+
+        if (subtaskLogsToInsert.length > 0) {
+          const { error: subLogsInsertErr } = await supabase
+            .from('subtask_logs')
+            .insert(subtaskLogsToInsert);
+
+          if (subLogsInsertErr) throw subLogsInsertErr;
+        }
+
+        const displayId = taskToEdit.display_id ? String(taskToEdit.display_id).padStart(6, '0') : '';
+        const idSuffix = displayId ? ` [${displayId}]` : '';
+        await logger.log('UPDATE_TASK_LOG_TODAY', `Updated task and subtasks logs for today only${idSuffix}: ${taskName.trim()}`, { taskId: taskToEdit.id, payload: taskLogPayload });
+
+        // Trigger silent update of checklist stores to reload dynamically today's task
+        const appState = useAppStore.getState();
+        if (appState.startDate) {
+          await appState.fetchDailyTasks(appState.startDate, appState.endDate || undefined, true);
+        }
+
+      } else if (isEditMode && taskToEdit) {
+        // --- 2. STANDARD FUTURE TEMPLATE UPDATE ---
         // A. Cập nhật task bản mẫu trong bảng tasks
         const { error: taskError } = await supabase
           .from('tasks')
@@ -877,7 +959,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         await logger.log('CREATE_TASK_TEMPLATE', `Created task template${idSuffix}: ${taskName.trim()}`, { taskId, payload });
       }
 
-      toast.success(isEditMode ? 'Success updating template!' : 'Success creating template!');
+      toast.success(isEditMode ? 'Cập nhật bản mẫu thành công!' : 'Tạo bản mẫu thành công!');
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -886,6 +968,159 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
     } finally {
       setLoading(false);
     }
+  };
+
+  // Form submit callback handler
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!taskName.trim()) {
+      toast.warning('Please enter the Task Name.');
+      return;
+    }
+    if (hasEmoji(taskName)) {
+      toast.warning('Task Name cannot contain emojis or icons.');
+      return;
+    }
+    if (!project) {
+      toast.warning('Please select a Project.');
+      return;
+    }
+    if (!tag) {
+      toast.warning('Please select a Tag.');
+      return;
+    }
+    if (!taskType) {
+      toast.warning('Please select a Task Type.');
+      return;
+    }
+    if (!note.trim()) {
+      toast.warning('Please enter the Note (cannot be empty).');
+      return;
+    }
+    if (!containsLink(note)) {
+      toast.warning('Note must contain a valid URL/link (e.g. http://, https:// or www.).');
+      return;
+    }
+    if (hasEmoji(note)) {
+      toast.warning('Note cannot contain emojis or icons.');
+      return;
+    }
+    if (!deadlineTime24h) {
+      toast.warning('Please select a Deadline time.');
+      return;
+    }
+    if (taskType === 'WEEKLY' && selectedDays.length === 0) {
+      toast.warning('Please select at least one Repeat day.');
+      return;
+    }
+    if (taskType === 'MONTHLY') {
+      if (!monthlyDays.trim()) {
+        toast.warning('Please enter the Monthly repeat days.');
+        return;
+      }
+      const clean = monthlyDays.trim();
+      const parts = clean.split(/[\s,]+/).map(p => p.trim()).filter(p => p.length > 0);
+      if (parts.length === 0) {
+        toast.warning('Monthly repeat days must contain at least one day number.');
+        return;
+      }
+      for (const part of parts) {
+        if (!/^\d+$/.test(part)) {
+          toast.warning('Monthly repeat days must contain only numbers between 1 and 31 separated by commas or spaces (no letters or indicators allowed).');
+          return;
+        }
+        const num = parseInt(part, 10);
+        if (num < 1 || num > 31) {
+          toast.warning(`Invalid monthly repeat day: ${part}. Days must be between 1 and 31.`);
+          return;
+        }
+      }
+    }
+    if (taskType === 'ONETIME') {
+      if (!onetimeStartDate) {
+        toast.warning('Please select a Deadline date.');
+        return;
+      }
+      if (onetimeTargets.length === 0) {
+        toast.warning('Please select a valid date range.');
+        return;
+      }
+    }
+    if (subTasks.length === 0) {
+      toast.warning('Please add at least one sub-task.');
+      return;
+    }
+    for (const sub of subTasks) {
+      if (!sub.content.trim()) {
+        toast.warning('Sub-task content cannot be empty.');
+        return;
+      }
+      if (hasEmoji(sub.content)) {
+        toast.warning('Sub-task content cannot contain emojis or icons.');
+        return;
+      }
+      if (!sub.assignee) {
+        toast.warning('Sub-task assignee cannot be empty.');
+        return;
+      }
+      if (sub.estimated_minutes !== undefined && sub.estimated_minutes < 0) {
+        toast.warning('Estimated time for the sub-task cannot be negative.');
+        return;
+      }
+    }
+
+    if (isEditMode && taskToEdit) {
+      const isRecurring = taskType !== 'ONETIME';
+      const isOnetimeMultiDay = taskType === 'ONETIME' && onetimeTargets.length > 1;
+
+      // Determine isScheduledToday
+      let isScheduledToday = false;
+      const today = new Date();
+      const todayStr = getTodayDateString();
+      const daysMap = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const todayDayName = daysMap[today.getDay()];
+      const todayDateNum = today.getDate();
+
+      if (taskType === 'DAILY') {
+        isScheduledToday = today.getDay() >= 1 && today.getDay() <= 5;
+      } else if (taskType === 'WEEKLY') {
+        isScheduledToday = selectedDays.includes(todayDayName);
+      } else if (taskType === 'MONTHLY') {
+        const parts = monthlyDays.split(/[\s,]+/).map(p => p.trim()).filter(Boolean);
+        isScheduledToday = parts.some(p => parseInt(p, 10) === todayDateNum);
+      } else if (taskType === 'FLEXIBLE') {
+        isScheduledToday = true;
+      } else if (taskType === 'ONETIME') {
+        isScheduledToday = onetimeTargets.some(t => t.date === todayStr);
+      }
+
+      if (isRecurring) {
+        setScopeDialogData({
+          isRecurring: true,
+          isScheduledToday,
+          isOnetimeMultiDay: false,
+          onetimeDaysCount: 0
+        });
+        setShowScopeDialog(true);
+        return;
+      } else if (isOnetimeMultiDay) {
+        const sorted = [...onetimeTargets].sort((a, b) => a.date.localeCompare(b.date));
+        setScopeDialogData({
+          isRecurring: false,
+          isScheduledToday,
+          isOnetimeMultiDay: true,
+          onetimeDaysCount: onetimeTargets.length,
+          firstDate: sorted[0]?.date,
+          lastDate: sorted[sorted.length - 1]?.date
+        });
+        setShowScopeDialog(true);
+        return;
+      }
+    }
+
+    // Default to 'FUTURE' edit scope for simple saves
+    await executeSave('FUTURE');
   };
 
   const backdropClickedRef = useRef(false);
@@ -1227,8 +1462,9 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
             </button>
             <button 
               type="submit" 
-              disabled={loading} 
+              disabled={loading || (isEditMode && isUnchanged)} 
               className="flex-1 h-8 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+              title={isEditMode && isUnchanged ? "No changes to save" : ""}
             >
               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin text-white" /> : null}
               <span>{isEditMode ? 'Save changes' : 'Create task'}</span>
@@ -1236,6 +1472,95 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           </div>
         </form>
       </div>
+
+      {showScopeDialog && scopeDialogData && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-100 p-6 space-y-4 animate-in zoom-in-95 duration-150 text-left">
+            <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <span>Lựa chọn phạm vi áp dụng chỉnh sửa</span>
+            </h4>
+            
+            <div className="text-xs text-slate-600 space-y-2 leading-relaxed">
+              {scopeDialogData.isRecurring ? (
+                <>
+                  <p>
+                    Bạn đang chỉnh sửa một <strong>Task định kỳ / lặp lại</strong> ({taskType}).
+                  </p>
+                  {scopeDialogData.isScheduledToday ? (
+                    <div className="p-2.5 bg-green-50 border border-green-100 text-green-800 rounded-lg">
+                      Hôm nay ({getTodayDateString()}) là ngày xuất hiện của task này. Do đó, bạn có thể chọn chỉ áp dụng thay đổi cho hôm nay hoặc cho toàn bộ tương lai.
+                    </div>
+                  ) : (
+                    <div className="p-2.5 bg-amber-50 border border-amber-100 text-amber-800 rounded-lg">
+                      Hôm nay ({getTodayDateString()}) <strong>không nằm trong lịch xuất hiện gốc</strong> của task này. Bạn chỉ nên lựa chọn áp dụng từ nay về sau (không thể chọn "Chỉ hôm nay" do không có instance hiển thị).
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p>
+                    Bạn đang chỉnh sửa một <strong>Task dài ngày</strong> kéo dài {scopeDialogData.onetimeDaysCount} ngày (từ {scopeDialogData.firstDate} đến {scopeDialogData.lastDate}).
+                  </p>
+                  {scopeDialogData.isScheduledToday ? (
+                    <div className="p-2.5 bg-green-50 border border-green-100 text-green-800 rounded-lg">
+                      Hôm nay ({getTodayDateString()}) nằm trong khoảng thời gian diễn ra của task này. Do đó, bạn có thể chọn chỉ áp dụng thay đổi cho hôm nay hoặc cho toàn bộ tương lai.
+                    </div>
+                  ) : (
+                    <div className="p-2.5 bg-amber-50 border border-amber-100 text-amber-800 rounded-lg">
+                      Hôm nay ({getTodayDateString()}) <strong>không nằm trong khoảng thời gian diễn ra</strong> của task này ({scopeDialogData.firstDate} ~ {scopeDialogData.lastDate}). Bạn chỉ nên áp dụng từ nay về sau (không thể chọn "Chỉ hôm nay" do không có instance hiển thị).
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-400 font-medium">
+              Vui lòng chọn phạm vi áp dụng chỉnh sửa:
+            </p>
+
+            <div className="flex flex-col gap-2 pt-1.5">
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowScopeDialog(false);
+                  await executeSave('FUTURE');
+                }}
+                className="w-full h-8 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-sm flex items-center justify-center gap-1 cursor-pointer"
+              >
+                Áp dụng từ hôm nay trở đi (Today & Future)
+              </button>
+
+              <button
+                type="button"
+                disabled={!scopeDialogData.isScheduledToday}
+                onClick={async () => {
+                  setShowScopeDialog(false);
+                  await executeSave('TODAY_ONLY');
+                }}
+                className={`w-full h-8 px-4 text-xs font-semibold rounded-lg transition-all shadow-sm flex items-center justify-center gap-1 cursor-pointer border ${
+                  scopeDialogData.isScheduledToday
+                    ? 'text-slate-700 bg-white hover:bg-slate-50 border-slate-200'
+                    : 'text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed'
+                }`}
+                title={!scopeDialogData.isScheduledToday ? "Hôm nay không phải ngày diễn ra task này" : undefined}
+              >
+                Chỉ áp dụng duy nhất hôm nay (Today Only)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowScopeDialog(false);
+                  setLoading(false);
+                }}
+                className="w-full h-8 px-4 text-xs font-medium text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all text-center cursor-pointer"
+              >
+                Hủy bỏ (Cancel)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -164,7 +164,40 @@ const getVirtualOccurrences = (
   const endD = parseDateStringUTC(endDate);
 
   if (type === 'ONETIME') {
-    return [];
+    const datesParsed: string[] = [];
+    if (cleanDays.includes('~')) {
+      const parts = cleanDays.split('~').map(s => s.trim());
+      const startStr = parts[0];
+      const endStr = parts[1];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(startStr) && /^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
+        let curr = parseDateStringUTC(startStr);
+        const last = parseDateStringUTC(endStr);
+        while (curr <= last) {
+          datesParsed.push(formatDateUTC(curr));
+          curr.setUTCDate(curr.getUTCDate() + 1);
+        }
+      }
+    } else if (cleanDays.includes(',')) {
+      cleanDays.split(',').forEach(s => {
+        const dStr = s.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) {
+          datesParsed.push(dStr);
+        }
+      });
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDays)) {
+      datesParsed.push(cleanDays);
+    }
+
+    datesParsed.forEach(dateStr => {
+      if (dateStr >= startDate && dateStr <= endDate) {
+        occurrences.push({
+          todo_date: dateStr,
+          completion_key: dateStr
+        });
+      }
+    });
+
+    return occurrences;
   }
 
   const createdAtDate = createdAt ? createdAt.split('T')[0] : '';
@@ -403,6 +436,10 @@ export default function Dashboard() {
     return filterTeam ? filterTeam.split(',').filter(Boolean) : [];
   }, [filterTeam]);
 
+  const selectedTaskTypes = useMemo(() => {
+    return filterTaskType ? filterTaskType.split(',').filter(Boolean) : [];
+  }, [filterTaskType]);
+
   // Date Range filter states - Default is TODAY's date
   const [startDate, setStartDate] = useState<string>(() => sessionStorage.getItem('db_startDate') || getLocalDateString(new Date()));
   const [endDate, setEndDate] = useState<string>(() => sessionStorage.getItem('db_endDate') || getLocalDateString(new Date()));
@@ -513,7 +550,7 @@ export default function Dashboard() {
         }));
       }
 
-      const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY'].includes((task.task_type || '').toUpperCase());
+      const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONETIME'].includes((task.task_type || '').toUpperCase());
 
       // Correct meta based todo_status and date for OneTime
       const isOneTime = (task.task_type || '').toUpperCase() === 'ONETIME';
@@ -563,7 +600,7 @@ export default function Dashboard() {
             const hasMatchingTeam = allTeams.some(t => selectedTeams.includes(t));
             if (!hasMatchingTeam) return;
           }
-          if (filterTaskType && (task.task_type || '').toUpperCase() !== filterTaskType.toUpperCase()) return;
+          if (selectedTaskTypes.length > 0 && !selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return;
 
           // Filter check dynamic Assignee (Sub-tasks or Main assignees)
           if (filterPersonnel) {
@@ -674,7 +711,7 @@ export default function Dashboard() {
             const hasMatchingTeam = allTeams.some(t => selectedTeams.includes(t));
             if (!hasMatchingTeam) return;
           }
-          if (filterTaskType && (task.task_type || '').toUpperCase() !== filterTaskType.toUpperCase()) return;
+          if (selectedTaskTypes.length > 0 && !selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return;
 
           // Filter check dynamic Assignee (Sub-tasks or Main assignees)
           if (filterPersonnel) {
@@ -749,7 +786,7 @@ export default function Dashboard() {
     });
 
     return list;
-  }, [tasks, startDate, endDate, filterPersonnel, filterProject, filterTag, filterTeam, filterTaskType, getTaskTeams]);
+  }, [tasks, startDate, endDate, filterPersonnel, filterProject, filterTag, filterTeam, selectedTaskTypes, getTaskTeams]);
 
   // Compute stat metrics for the 5 Overview cards from the stats list
   const stats = useMemo(() => {
@@ -794,7 +831,7 @@ export default function Dashboard() {
           }));
         }
 
-        const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY'].includes((task.task_type || '').toUpperCase());
+        const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONETIME'].includes((task.task_type || '').toUpperCase());
 
         if (isRecurring) {
           const occurrences = getVirtualOccurrences(
@@ -852,7 +889,7 @@ export default function Dashboard() {
               const hasMatchingTeam = allTeams.some(t => selectedTeams.includes(t));
               if (!hasMatchingTeam) return;
             }
-            if (filterTaskType && (task.task_type || '').toUpperCase() !== filterTaskType.toUpperCase()) return;
+            if (selectedTaskTypes.length > 0 && !selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return;
 
             // Filter check Assignee (subtasks or main)
             if (filterPersonnel) {
@@ -917,7 +954,7 @@ export default function Dashboard() {
                 const hasMatchingTeam = allTeams.some(t => selectedTeams.includes(t));
                 if (!hasMatchingTeam) return;
               }
-              if (filterTaskType && (task.task_type || '').toUpperCase() !== filterTaskType.toUpperCase()) return;
+              if (selectedTaskTypes.length > 0 && !selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return;
 
               // Filter check Assignee (subtasks or main)
               if (filterPersonnel) {
@@ -989,7 +1026,7 @@ export default function Dashboard() {
         dayRows
       };
     });
-  }, [tasks, weekDays, filterPersonnel, filterProject, filterTag, filterTeam, filterTaskType, getTaskTeams]);
+  }, [tasks, weekDays, filterPersonnel, filterProject, filterTag, filterTeam, selectedTaskTypes, getTaskTeams]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-slate-50 overflow-x-auto text-left font-sans">
@@ -1064,7 +1101,7 @@ export default function Dashboard() {
           />
 
           {/* TASK TYPE Filter */}
-          <FilterSelect
+          <MultiTeamFilterSelect
             value={filterTaskType}
             onChange={setFilterTaskType}
             defaultOptionLabel="Type"
@@ -1075,7 +1112,6 @@ export default function Dashboard() {
               { value: 'ONETIME', label: 'Onetime' }
             ]}
             className="h-8 w-[100px] min-w-[100px] max-w-[100px]"
-            id="task-type-select"
           />
 
           {/* DATE RANGE FILTER PICKER */}

@@ -143,20 +143,33 @@ export interface AppState {
   dailyTasksLoaded: boolean;
   dailyTasksLoading: boolean;
 
+  // Date tracking for daily tasks
+  startDate: string;
+  endDate: string;
+  setDates: (start: string, end: string) => void;
+
   fetchMetadata: (force?: boolean) => Promise<void>;
   fetchTasks: (force?: boolean) => Promise<void>;
   fetchApproveTasks: (force?: boolean) => Promise<void>;
-  fetchDailyTasks: (startDateString: string, endDateString?: string) => Promise<void>;
+  fetchDailyTasks: (startDateString: string, endDateString?: string, isSilent?: boolean) => Promise<void>;
   setTasks: (tasks: any[] | ((prev: any[]) => any[])) => void;
 }
 
 // Helper to parse description
+const getTodayDateStringInternal = (): string => {
+  const d = new Date();
+  const tzOffset = d.getTimezoneOffset() * 60000;
+  const localISOTime = (new Date(d.getTime() - tzOffset)).toISOString().slice(0, 10);
+  return localISOTime;
+};
+
 const parseTaskDescriptionLocal = (rawDescription: any) => {
   const defaultMeta = {
     project_name: '',
     team_name: '',
     tag_name: '',
-    note: ''
+    note: '',
+    versions: [] as any[]
   };
 
   if (!rawDescription) return defaultMeta;
@@ -166,7 +179,8 @@ const parseTaskDescriptionLocal = (rawDescription: any) => {
       project_name: rawDescription.project_name || '',
       team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
-      note: rawDescription.note || rawDescription.description || ''
+      note: rawDescription.note || rawDescription.description || '',
+      versions: rawDescription.versions || []
     };
   }
 
@@ -179,7 +193,8 @@ const parseTaskDescriptionLocal = (rawDescription: any) => {
           project_name: parsed.project_name || '',
           team_name: parsed.team_name || '',
           tag_name: parsed.tag_name || '',
-          note: parsed.note || parsed.description || ''
+          note: parsed.note || parsed.description || '',
+          versions: parsed.versions || []
         };
       } catch {
         // Fallback
@@ -248,6 +263,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   dailyTasks: [],
   dailyTasksLoaded: false,
   dailyTasksLoading: false,
+
+  // Date tracking for daily tasks
+  startDate: typeof window !== 'undefined' ? (sessionStorage.getItem('todo_startDate') || getTodayDateStringInternal()) : '',
+  endDate: typeof window !== 'undefined' ? (sessionStorage.getItem('todo_endDate') || getTodayDateStringInternal()) : '',
+  setDates: (start: string, end: string) => set({ startDate: start, endDate: end }),
 
   fetchMetadata: async (force = false) => {
     if (get().metadataLoading) return;
@@ -324,11 +344,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         
         // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
         const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
+        const projName = task.project_name || '';
+        const tagName = task.tag_name || '';
+        const teamName = task.team_name || firstTeamName;
+
+        const parsedDesc = parseTaskDescriptionLocal(task.description);
         const meta = {
-          project_name: task.project_name || '',
-          team_name: firstTeamName,
-          tag_name: task.tag_name || '',
-          note: (task.description && !task.description.startsWith('{')) ? task.description : ''
+          project_name: projName,
+          team_name: teamName,
+          tag_name: tagName,
+          note: parsedDesc.note,
+          versions: parsedDesc.versions || []
         };
         const completions: Record<string, any> = {};
 
@@ -442,9 +468,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchDailyTasks: async (startDateString: string, endDateString?: string) => {
+  fetchDailyTasks: async (startDateString: string, endDateString?: string, isSilent = false) => {
     if (get().dailyTasksLoading) return;
-    set({ dailyTasksLoading: true });
+    set({ 
+      dailyTasksLoading: true, 
+      ...(isSilent ? {} : { dailyTasksLoaded: false })
+    });
     try {
       // 1. Fetch all template tasks and nested subtasks
       const { data: tasksData, error: tasksError } = await supabase
@@ -486,14 +515,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         
         // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
         const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
+        const projName = task.project_name || '';
+        const tagName = task.tag_name || '';
+        const teamName = task.team_name || firstTeamName;
+
+        const parsedDesc = parseTaskDescriptionLocal(task.description);
         const meta = {
-          project_name: task.project_name || '',
-          team_name: firstTeamName,
-          tag_name: task.tag_name || '',
-          note: (task.description && !task.description.startsWith('{')) ? task.description : ''
+          project_name: projName,
+          team_name: teamName,
+          tag_name: tagName,
+          note: parsedDesc.note,
+          versions: parsedDesc.versions || []
         };
 
         const taskLogs = taskLogsData.filter((log: any) => log.task_id === task.id);
+        const taskSubtaskLogs = subtaskLogsData.filter((log: any) => log.task_id === task.id);
         
         const subtasksWithLogs = (task.subtasks || []).map((subtask: any) => {
           const matchedSubtaskLogs = subtaskLogsData.filter((log: any) => log.subtask_id === subtask.id);
@@ -510,7 +546,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           task_name: task.task_name || task.title, // Backward compatibility with task_name property
           type: task.type || task.task_type, // Map task_type to legacy type
           subtasks: subtasksWithLogs,
-          task_logs: taskLogs
+          task_logs: taskLogs,
+          subtask_logs: taskSubtaskLogs
         };
       });
 

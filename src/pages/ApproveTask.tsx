@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Search, RotateCcw, Plus, Trash2, Power, Clock, ChevronLeft, ChevronRight, 
-  Edit2, MoreHorizontal, X, AlertCircle, Loader2, Check, Ban
+  Edit2, MoreHorizontal, X, AlertCircle, Loader2, Check, Ban, History, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
@@ -155,6 +155,60 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   };
 };
 
+const getTodayDateString = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getYesterdayDateString = (todayStr: string): string => {
+  const d = new Date(todayStr);
+  d.setDate(d.getDate() - 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const determineIsScheduledToday = (taskType: string, deadlineDays: any): boolean => {
+  const today = new Date();
+  const daysMap = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const todayDayName = daysMap[today.getDay()];
+  const todayDateNum = today.getDate();
+
+  if (taskType === 'DAILY') {
+    return today.getDay() >= 1 && today.getDay() <= 5;
+  }
+  
+  if (taskType === 'WEEKLY') {
+    let daysArray: string[] = [];
+    if (typeof deadlineDays === 'string') {
+      daysArray = deadlineDays.split(',').map((d: string) => d.trim());
+    } else if (Array.isArray(deadlineDays)) {
+      daysArray = deadlineDays;
+    }
+    return daysArray.includes(todayDayName);
+  }
+  
+  if (taskType === 'MONTHLY') {
+    let parts: string[] = [];
+    if (typeof deadlineDays === 'string') {
+      parts = deadlineDays.split(/[\s,]+/).map((p: string) => p.trim());
+    } else if (Array.isArray(deadlineDays)) {
+      parts = deadlineDays.map(String);
+    }
+    return parts.some(p => parseInt(p, 10) === todayDateNum);
+  }
+
+  if (taskType === 'FLEXIBLE') {
+    return true;
+  }
+
+  return false;
+};
+
 const ApproveTask: React.FC = () => {
   const { 
     showConfirm,
@@ -182,6 +236,14 @@ const ApproveTask: React.FC = () => {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // States for Scope Selection Modal on Approve Edit
+  const [showScopeDialog, setShowScopeDialog] = useState(false);
+  const [scopeDialogData, setScopeDialogData] = useState<{
+    request: any;
+    isRecurring: boolean;
+    isScheduledToday: boolean;
+  } | null>(null);
+
   // Search & Filters state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAssignee, setFilterAssignee] = useState(() => {
@@ -201,12 +263,17 @@ const ApproveTask: React.FC = () => {
   const [filterProject, setFilterProject] = useState('');
   const [filterTag, setFilterTag] = useState('');
   const [filterTaskType, setFilterTaskType] = useState('');
+  const selectedTaskTypes = useMemo(() => {
+    return filterTaskType ? filterTaskType.split(',').filter(Boolean) : [];
+  }, [filterTaskType]);
 
   // Modals & Panels
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalTask, setModalTask] = useState<DbApproveTask | null>(null);
   const [taskToClone, setTaskToClone] = useState<DbApproveTask | null>(null);
   const [openedDrawerTask, setOpenedDrawerTask] = useState<DbApproveTask | null>(null);
+  const [drawerTab, setDrawerTab] = useState<'details' | 'history'>('details');
+  const [expandedVersions, setExpandedVersions] = useState<Record<number, boolean>>({});
   const [activeMenuTaskId, setActiveMenuTaskId] = useState<string | null>(null);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
   const [rejectDialogTask, setRejectDialogTask] = useState<DbApproveTask | null>(null);
@@ -332,12 +399,12 @@ const ApproveTask: React.FC = () => {
       result = result.filter(r => r.tag_name === filterTag);
     }
 
-    if (filterTaskType) {
-      result = result.filter(r => r.task_type === filterTaskType);
+    if (selectedTaskTypes.length > 0) {
+      result = result.filter(r => selectedTaskTypes.includes(r.task_type));
     }
 
     return result;
-  }, [parsedRequests, searchQuery, filterAssignee, selectedTeams, filterStatus, filterProject, filterTag, filterTaskType]);
+  }, [parsedRequests, searchQuery, filterAssignee, selectedTeams, filterStatus, filterProject, filterTag, selectedTaskTypes]);
 
   // Pagination bounds
   const totalCount = filteredRequests.length;
@@ -377,385 +444,474 @@ const ApproveTask: React.FC = () => {
     setActiveMenuTaskId(null);
   };
 
+  const executeAcceptRequest = async (request: any, scope: 'FUTURE' | 'TODAY_ONLY') => {
+    setAcceptingId(request.id);
+    try {
+      let mergedCompletions = request.meta.completions || {};
+      let mergedOnetimeTargets = request.meta.onetime_targets || [];
+      let updatedVersions = request.meta.versions || [];
+
+      // 1. Fetch Master Data safely to map names back to UUIDs
+      const [projRes, teamRes, tagRes] = await Promise.all([
+        supabase.from('projects').select('id, name'),
+        supabase.from('teams').select('id, name'),
+        supabase.from('tags').select('id, name')
+      ]);
+      const projectsDb = projRes.data || [];
+      const teamsDb = teamRes.data || [];
+      const tagsDb = tagRes.data || [];
+
+      const selectedProjectObj = projectsDb.find(p => p.name === request.meta.project_name);
+      const selectedTeamObj = teamsDb.find(t => t.name === request.meta.team_name);
+      const selectedTagObj = tagsDb.find(t => t.name === request.meta.tag_name);
+
+      // 2. Parse deadline days arrays
+      let deadlineDaysArray: string[] = [];
+      if (typeof request.meta.deadline_days === 'string') {
+        if (request.task_type === 'DAILY') {
+          deadlineDaysArray = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        } else if (request.task_type === 'WEEKLY') {
+          deadlineDaysArray = request.meta.deadline_days.split(',').map((d: string) => d.trim()).filter(Boolean);
+        } else if (request.task_type === 'MONTHLY') {
+          deadlineDaysArray = request.meta.deadline_days.split(/[\s,]+/).map((d: string) => d.trim()).filter(Boolean);
+        } else {
+          deadlineDaysArray = request.meta.deadline_days.split(',').map((d: string) => d.trim()).filter(Boolean);
+        }
+      } else if (Array.isArray(request.meta.deadline_days)) {
+        deadlineDaysArray = request.meta.deadline_days;
+      }
+
+      // 3. Parse and normalize deadline time (24-hour style hh:mm:ss)
+      const deadlineTimeRaw = request.meta.deadline_time || '';
+      let finalDeadlineTime = null;
+      if (deadlineTimeRaw) {
+        if (deadlineTimeRaw.toUpperCase().includes('AM') || deadlineTimeRaw.toUpperCase().includes('PM')) {
+          const parts = deadlineTimeRaw.match(/(\d+):(\d+)\s*(AM|PM)/i);
+          if (parts) {
+            let hour = parseInt(parts[1], 10);
+            const minute = parts[2];
+            const ampm = parts[3].toUpperCase();
+            if (ampm === 'PM' && hour < 12) hour += 12;
+            if (ampm === 'AM' && hour === 12) hour = 0;
+            finalDeadlineTime = `${String(hour).padStart(2, '0')}:${minute}:00`;
+          } else {
+            finalDeadlineTime = deadlineTimeRaw;
+          }
+        } else {
+          finalDeadlineTime = deadlineTimeRaw.includes(':') && deadlineTimeRaw.split(':').length === 2 ? `${deadlineTimeRaw}:00` : deadlineTimeRaw;
+        }
+      }
+
+      const isEditRequest = !!request.meta?.original_task_id;
+      const calculated_request_est_time = (request.meta.sub_tasks || []).reduce(
+        (sum: number, s: any) => sum + (Number(s.estimated_minutes) || 0), 
+        0
+      );
+      const final_est_time = request.est_time || calculated_request_est_time;
+      const updaterName = profile?.name || profile?.email || 'System';
+
+      if (isEditRequest) {
+        // Fetch the LATEST state of the original task to prevent race conditions & overwriting newer completions
+        const { data: originalTask, error: fetchError } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('id', request.meta.original_task_id)
+          .single();
+
+        if (fetchError || !originalTask) {
+          throw new Error("Could not find the original task to apply approved edit. It may have been deleted.");
+        }
+
+        if (scope === 'TODAY_ONLY') {
+          // --- TODAY_ONLY: ONLY UPDATE TODAY'S LOGS ---
+          const todayStr = getTodayDateString();
+
+          const { data: existingLog, error: fetchLogErr } = await supabase
+            .from('task_logs')
+            .select('*')
+            .eq('task_id', request.meta.original_task_id)
+            .eq('todo_date', todayStr)
+            .maybeSingle();
+
+          if (fetchLogErr) throw fetchLogErr;
+
+          const taskLogStatus = existingLog ? (existingLog.status || 'NEW') : 'NEW';
+          const computedDeadlineDays = typeof request.meta.deadline_days === 'string'
+            ? request.meta.deadline_days
+            : (Array.isArray(request.meta.deadline_days) ? request.meta.deadline_days.join(', ') : 'Mon - Fri');
+
+          const taskLogPayload = {
+            task_id: request.meta.original_task_id,
+            todo_date: todayStr,
+            status: taskLogStatus,
+            title: request.title,
+            project_name: request.meta.project_name || '',
+            tag_name: request.meta.tag_name || '',
+            deadline_time: finalDeadlineTime,
+            deadline_days: computedDeadlineDays,
+            task_type: request.task_type,
+            est_time: final_est_time,
+            updated_by: updaterName,
+            actual_minutes: existingLog ? (existingLog.actual_minutes || 0) : 0
+          };
+
+          // Upsert the task log
+          const { error: logUpsertErr } = await supabase
+            .from('task_logs')
+            .upsert(taskLogPayload, { onConflict: 'task_id, todo_date' });
+
+          if (logUpsertErr) throw logUpsertErr;
+
+          // Fetch existing subtask logs for today to map completion state
+          const { data: dbSubtaskLogs, error: subLogsFetchErr } = await supabase
+            .from('subtask_logs')
+            .select('*')
+            .eq('task_id', request.meta.original_task_id)
+            .eq('todo_date', todayStr);
+
+          if (subLogsFetchErr) throw subLogsFetchErr;
+
+          // Delete old subtask logs for today
+          const { error: subLogsDeleteErr } = await supabase
+            .from('subtask_logs')
+            .delete()
+            .eq('task_id', request.meta.original_task_id)
+            .eq('todo_date', todayStr);
+
+          if (subLogsDeleteErr) throw subLogsDeleteErr;
+
+          // Build and insert new subtask logs
+          const subtaskLogsToInsert = (request.meta.sub_tasks || []).map((st: any) => {
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(st.id);
+            const subtaskId = isUuid ? st.id : null;
+
+            // Try to match with existing log
+            const matchedLog = dbSubtaskLogs?.find((l: any) => 
+              (subtaskId && l.subtask_id === subtaskId) || l.content === st.content
+            );
+
+            return {
+              task_id: request.meta.original_task_id,
+              subtask_id: subtaskId,
+              todo_date: todayStr,
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes,
+              team_name: request.meta.team_name || '',
+              is_completed: matchedLog ? matchedLog.is_completed : false,
+              status: matchedLog ? (matchedLog.status || 'NEW') : 'NEW',
+              completed_by: matchedLog ? matchedLog.completed_by : null,
+              actual_minutes: matchedLog ? (matchedLog.actual_minutes || 0) : 0
+            };
+          });
+
+          if (subtaskLogsToInsert.length > 0) {
+            const { error: subLogsInsertErr } = await supabase
+              .from('subtask_logs')
+              .insert(subtaskLogsToInsert);
+
+            if (subLogsInsertErr) throw subLogsInsertErr;
+          }
+
+          const displayId = originalTask.display_id ? String(originalTask.display_id).padStart(6, '0') : '';
+          const idSuffix = displayId ? ` [${displayId}]` : '';
+          await logger.log('APPROVE_TASK_ACCEPTED_TODAY', `Accepted edit and updated today's instance only for task${idSuffix}: ${request.title}`, { title: request.title, originalTaskId: request.meta.original_task_id, originalRequestId: request.id });
+
+          toast.success(`Request accepted! Changes applied only for today's instance of task "${request.title}".`);
+        } else {
+          // --- FUTURE: Standard Template and Subtasks Delta sync ---
+          const latestMeta = parseTaskDescription(originalTask.description);
+          
+          mergedCompletions = latestMeta.completions || {};
+          mergedOnetimeTargets = latestMeta.onetime_targets || [];
+          updatedVersions = latestMeta.versions || [];
+
+          const reconcileSubtasksState = (existingSubs: any[] | undefined, templateSubs: any[]): any[] => {
+            if (!Array.isArray(existingSubs)) {
+              return templateSubs.map(sf => ({
+                ...sf,
+                sub_status: 'New',
+                actual_minutes: sf.estimated_minutes
+              }));
+            }
+
+            const existingMap = new Map(existingSubs.map(s => [s.id, s]));
+
+            return templateSubs.map(templateSub => {
+              const existingSub = existingMap.get(templateSub.id);
+              if (existingSub) {
+                return {
+                  ...existingSub,
+                  content: templateSub.content,
+                  assignee: templateSub.assignee,
+                  estimated_minutes: templateSub.estimated_minutes,
+                  sub_status: existingSub.sub_status || 'New',
+                  actual_minutes: existingSub.actual_minutes !== undefined ? existingSub.actual_minutes : templateSub.estimated_minutes
+                };
+              } else {
+                return {
+                  ...templateSub,
+                  sub_status: 'New',
+                  actual_minutes: templateSub.estimated_minutes
+                };
+              }
+            });
+          };
+
+          // Reconcile subtasks in live completions
+          Object.keys(mergedCompletions).forEach(key => {
+            const comp = mergedCompletions[key];
+            if (comp && comp.todo_status !== 'DONE' && comp.todo_status !== 'SKIPPED' && Array.isArray(comp.sub_tasks)) {
+              comp.sub_tasks = reconcileSubtasksState(comp.sub_tasks, request.meta.sub_tasks || []);
+            }
+          });
+
+          // Reconcile subtasks in live onetime targets
+          if (Array.isArray(mergedOnetimeTargets)) {
+            mergedOnetimeTargets = (request.meta.onetime_targets || []).map((userTgt: any) => {
+              const existingTgt = latestMeta.onetime_targets?.find((t: any) => t.date === userTgt.date);
+              const isSubmitted = existingTgt?.todo_status === 'DONE' || existingTgt?.todo_status === 'SKIPPED';
+              return {
+                id: userTgt.id,
+                date: userTgt.date,
+                time: userTgt.time,
+                todo_status: existingTgt?.todo_status || 'NEW',
+                sub_tasks: isSubmitted
+                  ? (existingTgt?.sub_tasks || [])
+                  : reconcileSubtasksState(existingTgt?.sub_tasks, request.meta.sub_tasks || []),
+                actual_time: existingTgt?.actual_time || 0,
+                updated_by: existingTgt?.updated_by,
+                updated_at: existingTgt?.updated_at
+              };
+            });
+          }
+
+          // Structural versioning
+          const todayStr = getTodayDateString();
+          const yesterdayStr = getYesterdayDateString(todayStr);
+
+          const current_valid_from = latestMeta.last_updated_at
+            ? latestMeta.last_updated_at.split('T')[0]
+            : (originalTask.created_at ? originalTask.created_at.split('T')[0] : todayStr);
+
+          if (current_valid_from <= yesterdayStr) {
+            const oldVersion = {
+              valid_from: current_valid_from,
+              valid_until: yesterdayStr,
+              title: originalTask.title,
+              description: latestMeta.description || '',
+              project_name: latestMeta.project_name,
+              team_name: latestMeta.team_name,
+              tag_name: latestMeta.tag_name,
+              deadline_time: latestMeta.deadline_time,
+              deadline_days: latestMeta.deadline_days,
+              est_time: originalTask.est_time,
+              sub_tasks: latestMeta.sub_tasks || []
+            };
+            updatedVersions = [...updatedVersions, oldVersion];
+          }
+
+          // Update tasks
+          const { error: updateError } = await supabase
+            .from('tasks')
+            .update({
+              title: request.title,
+              task_name: request.title,
+              description: request.meta.note || '',
+              task_type: request.task_type,
+              type: request.task_type,
+              est_time: final_est_time,
+              project_name: request.meta.project_name || '',
+              tag_name: request.meta.tag_name || '',
+              deadline_time: finalDeadlineTime,
+              deadline_days: deadlineDaysArray
+            })
+            .eq('id', request.meta.original_task_id);
+
+          if (updateError) throw updateError;
+
+          // Subtasks Delta Sync
+          const { data: dbSubtasks, error: fetchSubError } = await supabase
+            .from('subtasks')
+            .select('id')
+            .eq('task_id', request.meta.original_task_id);
+
+          if (fetchSubError) throw fetchSubError;
+
+          const dbSubsArray = dbSubtasks || [];
+          const draftSubtasks = request.meta.sub_tasks || [];
+
+          const subtasksToUpdate: any[] = [];
+          const subtasksToInsert: any[] = [];
+          const subtasksToDelete: any[] = [];
+
+          const dbSubtaskMap = new Map();
+          dbSubsArray.forEach((dbSub: any) => dbSubtaskMap.set(dbSub.id, dbSub));
+
+          const seenDbIds = new Set<string>();
+
+          draftSubtasks.forEach((st: any) => {
+            const matchedDbSub = dbSubtaskMap.get(st.id);
+            if (matchedDbSub) {
+              subtasksToUpdate.push({
+                id: matchedDbSub.id,
+                content: st.content,
+                assignee: st.assignee,
+                estimated_minutes: Number(st.estimated_minutes) || 0,
+                team_name: request.meta.team_name || ''
+              });
+              seenDbIds.add(matchedDbSub.id);
+            } else {
+              subtasksToInsert.push({
+                task_id: request.meta.original_task_id,
+                content: st.content,
+                assignee: st.assignee,
+                estimated_minutes: Number(st.estimated_minutes) || 0,
+                actual_minutes: 0,
+                status: 'PENDING',
+                team_name: request.meta.team_name || ''
+              });
+            }
+          });
+
+          dbSubsArray.forEach((dbSub: any) => {
+            if (!seenDbIds.has(dbSub.id)) {
+              subtasksToDelete.push(dbSub);
+            }
+          });
+
+          if (subtasksToDelete.length > 0) {
+            const { error: delErr } = await supabase
+              .from('subtasks')
+              .delete()
+              .in('id', subtasksToDelete.map(d => d.id));
+            if (delErr) throw delErr;
+          }
+
+          if (subtasksToUpdate.length > 0) {
+            const updatePromises = subtasksToUpdate.map(sub => {
+              const { id, ...updateData } = sub;
+              return supabase.from('subtasks').update(updateData).eq('id', id);
+            });
+            const updateResults = await Promise.all(updatePromises);
+            const firstErr = updateResults.find(r => r.error);
+            if (firstErr) throw firstErr.error;
+          }
+
+          if (subtasksToInsert.length > 0) {
+            const { error: insErr } = await supabase.from('subtasks').insert(subtasksToInsert);
+            if (insErr) throw insErr;
+          }
+
+          await logger.log(
+            'APPROVE_TASK_ACCEPTED', 
+            `Accepted and updated task template "${request.title}" suggested by user`, 
+            { title: request.title, originalTaskId: request.meta.original_task_id, originalRequestId: request.id }
+          );
+
+          toast.success(`Request accepted! Changes applied to task template "${request.title}".`);
+        }
+      } else {
+        // --- NEW TASK TEMPLATE CREATION ---
+        const { data: newTasks, error: insertError } = await supabase
+          .from('tasks')
+          .insert([{
+            title: request.title,
+            task_name: request.title,
+            description: request.meta.note || '',
+            task_type: request.task_type,
+            type: request.task_type,
+            status: 'ON',
+            is_active: true,
+            est_time: final_est_time,
+            actual_time: 0,
+            project_name: request.meta.project_name || '',
+            tag_name: request.meta.tag_name || '',
+            deadline_time: finalDeadlineTime,
+            deadline_days: deadlineDaysArray
+          }])
+          .select();
+
+        if (insertError) throw insertError;
+        if (!newTasks || newTasks.length === 0) {
+          throw new Error("Could not retrieve newly created task ID.");
+        }
+
+        const newTaskId = newTasks[0].id;
+
+        const subtasksToInsert = (request.meta.sub_tasks || []).map((st: any) => ({
+          task_id: newTaskId,
+          content: st.content,
+          assignee: st.assignee,
+          estimated_minutes: Number(st.estimated_minutes) || 0,
+          actual_minutes: 0,
+          status: 'PENDING',
+          team_name: request.meta.team_name || ''
+        }));
+
+        if (subtasksToInsert.length > 0) {
+          const { error: insertSubError } = await supabase.from('subtasks').insert(subtasksToInsert);
+          if (insertSubError) throw insertSubError;
+        }
+
+        await logger.log(
+          'APPROVE_TASK_ACCEPTED', 
+          `Accepted and created task profile "${request.title}" suggested by user`, 
+          { title: request.title, originalRequestId: request.id }
+        );
+
+        toast.success(`Request accepted! Task template "${request.title}" is now live in Task Manager.`);
+      }
+
+      // 4. Update the state of request to APPROVED
+      const { error: updateRequestError } = await supabase
+        .from('approve_tasks')
+        .update({ status: 'APPROVED' })
+        .eq('id', request.id);
+
+      if (updateRequestError) throw updateRequestError;
+
+      setOpenedDrawerTask(null);
+      // 5. Synchronize App store
+      await fetchTasks(true);
+      await loadRequests();
+
+    } catch (err: any) {
+      console.error('[ApproveTask] Error accepting request:', err);
+      toast.error(`Database Error: ${err.message || 'Could not approve request'}`);
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
   const handleAcceptRequest = async (request: any, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setActiveMenuTaskId(null);
 
     const isEditRequest = !!request.meta?.original_task_id;
+    const isRecurring = request.task_type !== 'ONETIME';
 
-    showConfirm({
-      title: isEditRequest ? 'Accept Edit - Approve Template Changes' : 'Accept Create - Approve & Create Task Template',
-      message: isEditRequest
-        ? `Are you sure you want to approve request "${request.title}"? This will apply these changes to the existing Task Manager template and delete this pending request.`
-        : `Are you sure you want to approve request "${request.title}"? This will copy this profile into the Active Task Manager list and delete this pending request.`,
-      confirmText: isEditRequest ? 'Accept Edit' : 'Accept Create',
-      cancelText: 'Cancel',
-      onConfirm: async () => {
-        setAcceptingId(request.id);
-        try {
-          let mergedCompletions = request.meta.completions || {};
-          let mergedOnetimeTargets = request.meta.onetime_targets || [];
-          let updatedVersions = request.meta.versions || [];
-
-          // 1. Fetch Master Data safely to map names back to UUIDs
-          const [projRes, teamRes, tagRes] = await Promise.all([
-            supabase.from('projects').select('id, name'),
-            supabase.from('teams').select('id, name'),
-            supabase.from('tags').select('id, name')
-          ]);
-          const projectsDb = projRes.data || [];
-          const teamsDb = teamRes.data || [];
-          const tagsDb = tagRes.data || [];
-
-          const selectedProjectObj = projectsDb.find(p => p.name === request.meta.project_name);
-          const selectedTeamObj = teamsDb.find(t => t.name === request.meta.team_name);
-          const selectedTagObj = tagsDb.find(t => t.name === request.meta.tag_name);
-
-          // 2. Parse deadline days arrays
-          let deadlineDaysArray: string[] = [];
-          if (typeof request.meta.deadline_days === 'string') {
-            if (request.task_type === 'DAILY') {
-              deadlineDaysArray = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-            } else if (request.task_type === 'WEEKLY') {
-              deadlineDaysArray = request.meta.deadline_days.split(',').map((d: string) => d.trim()).filter(Boolean);
-            } else if (request.task_type === 'MONTHLY') {
-              deadlineDaysArray = request.meta.deadline_days.split(/[\s,]+/).map((d: string) => d.trim()).filter(Boolean);
-            } else {
-              deadlineDaysArray = request.meta.deadline_days.split(',').map((d: string) => d.trim()).filter(Boolean);
-            }
-          } else if (Array.isArray(request.meta.deadline_days)) {
-            deadlineDaysArray = request.meta.deadline_days;
-          }
-
-          // 3. Parse and normalize deadline time (24-hour style hh:mm:ss)
-          const deadlineTimeRaw = request.meta.deadline_time || '';
-          let finalDeadlineTime = null;
-          if (deadlineTimeRaw) {
-            if (deadlineTimeRaw.toUpperCase().includes('AM') || deadlineTimeRaw.toUpperCase().includes('PM')) {
-              const parts = deadlineTimeRaw.match(/(\d+):(\d+)\s*(AM|PM)/i);
-              if (parts) {
-                let hour = parseInt(parts[1], 10);
-                const minute = parts[2];
-                const ampm = parts[3].toUpperCase();
-                if (ampm === 'PM' && hour < 12) hour += 12;
-                if (ampm === 'AM' && hour === 12) hour = 0;
-                finalDeadlineTime = `${String(hour).padStart(2, '0')}:${minute}:00`;
-              } else {
-                finalDeadlineTime = deadlineTimeRaw;
-              }
-            } else {
-              finalDeadlineTime = deadlineTimeRaw.includes(':') && deadlineTimeRaw.split(':').length === 2 ? `${deadlineTimeRaw}:00` : deadlineTimeRaw;
-            }
-          }
-
-          if (isEditRequest) {
-            // 1. Fetch the LATEST state of the original task to prevent race conditions & overwriting newer completions
-            const { data: originalTask, error: fetchError } = await supabase
-              .from('tasks')
-              .select('*')
-              .eq('id', request.meta.original_task_id)
-              .single();
-
-            if (!fetchError && originalTask) {
-              const latestMeta = parseTaskDescription(originalTask.description);
-              
-              // Use the latest completions, versions and onetime_targets from the live database
-              mergedCompletions = latestMeta.completions || {};
-              mergedOnetimeTargets = latestMeta.onetime_targets || [];
-              updatedVersions = latestMeta.versions || [];
-
-              // Reconcile subtask status for completions & target tasks with the newly approved sub-tasks
-              const reconcileSubtasksState = (existingSubs: any[] | undefined, templateSubs: any[]): any[] => {
-                if (!Array.isArray(existingSubs)) {
-                  return templateSubs.map(sf => ({
-                    ...sf,
-                    sub_status: 'New',
-                    actual_minutes: sf.estimated_minutes
-                  }));
-                }
-
-                const existingMap = new Map(existingSubs.map(s => [s.id, s]));
-
-                return templateSubs.map(templateSub => {
-                  const existingSub = existingMap.get(templateSub.id);
-                  if (existingSub) {
-                    return {
-                      ...existingSub,
-                      content: templateSub.content,
-                      assignee: templateSub.assignee,
-                      estimated_minutes: templateSub.estimated_minutes,
-                      sub_status: existingSub.sub_status || 'New',
-                      actual_minutes: existingSub.actual_minutes !== undefined ? existingSub.actual_minutes : templateSub.estimated_minutes
-                    };
-                  } else {
-                    return {
-                      ...templateSub,
-                      sub_status: 'New',
-                      actual_minutes: templateSub.estimated_minutes
-                    };
-                  }
-                });
-              };
-
-              // Reconcile subtasks in live completions (protect already submitted completions from reset)
-              Object.keys(mergedCompletions).forEach(key => {
-                const comp = mergedCompletions[key];
-                if (comp && comp.todo_status !== 'DONE' && comp.todo_status !== 'SKIPPED' && Array.isArray(comp.sub_tasks)) {
-                  comp.sub_tasks = reconcileSubtasksState(comp.sub_tasks, request.meta.sub_tasks || []);
-                }
-              });
-
-              // Reconcile subtasks in live onetime targets
-              if (Array.isArray(mergedOnetimeTargets)) {
-                mergedOnetimeTargets = (request.meta.onetime_targets || []).map((userTgt: any) => {
-                  const existingTgt = latestMeta.onetime_targets?.find((t: any) => t.date === userTgt.date);
-                  const isSubmitted = existingTgt?.todo_status === 'DONE' || existingTgt?.todo_status === 'SKIPPED';
-                  return {
-                    id: userTgt.id,
-                    date: userTgt.date,
-                    time: userTgt.time,
-                    todo_status: existingTgt?.todo_status || 'NEW',
-                    sub_tasks: isSubmitted
-                      ? (existingTgt?.sub_tasks || [])
-                      : reconcileSubtasksState(existingTgt?.sub_tasks, request.meta.sub_tasks || []),
-                    actual_time: existingTgt?.actual_time || 0,
-                    updated_by: existingTgt?.updated_by,
-                    updated_at: existingTgt?.updated_at
-                  };
-                });
-              }
-
-              // 2. Add structural versioning of the old template (just like CreateTaskModal.tsx)
-              const todayStr = new Date().toISOString().split('T')[0];
-              const getYesterdayDateString = (tStr: string): string => {
-                const d = new Date(tStr);
-                d.setDate(d.getDate() - 1);
-                return d.toISOString().split('T')[0];
-              };
-              const yesterdayStr = getYesterdayDateString(todayStr);
-
-              const current_valid_from = latestMeta.last_updated_at
-                ? latestMeta.last_updated_at.split('T')[0]
-                : (originalTask.created_at ? originalTask.created_at.split('T')[0] : todayStr);
-
-              if (current_valid_from <= yesterdayStr) {
-                const oldVersion = {
-                  valid_from: current_valid_from,
-                  valid_until: yesterdayStr,
-                  title: originalTask.title,
-                  description: latestMeta.description || '',
-                  project_name: latestMeta.project_name,
-                  team_name: latestMeta.team_name,
-                  tag_name: latestMeta.tag_name,
-                  deadline_time: latestMeta.deadline_time,
-                  deadline_days: latestMeta.deadline_days,
-                  est_time: originalTask.est_time,
-                  sub_tasks: latestMeta.sub_tasks || []
-                };
-                updatedVersions = [...updatedVersions, oldVersion];
-              }
-            }
-          }
-
-          const calculated_request_est_time = (request.meta.sub_tasks || []).reduce(
-            (sum: number, s: any) => sum + (Number(s.estimated_minutes) || 0), 
-            0
-          );
-          const final_est_time = request.est_time || calculated_request_est_time;
-
-          if (isEditRequest) {
-            // Update the existing task template
-            const { error: updateError } = await supabase
-              .from('tasks')
-              .update({
-                title: request.title,
-                task_name: request.title,
-                description: request.meta.note || '', // Cột description chỉ lưu text ghi chú thuần túy
-                task_type: request.task_type,
-                type: request.task_type,
-                est_time: final_est_time,
-                project_name: request.meta.project_name || '',
-                tag_name: request.meta.tag_name || '',
-                deadline_time: finalDeadlineTime,
-                deadline_days: deadlineDaysArray
-              })
-              .eq('id', request.meta.original_task_id);
-
-            if (updateError) throw updateError;
-
-            // --- THUẬT TOÁN ĐỒNG BỘ DELTA CHO SUBTASKS (SUBTASK DELTA SYNC) ---
-            // Tránh xóa trắng subtask cũ của task template, tiến hành so sánh theo ID
-            const { data: dbSubtasks, error: fetchSubError } = await supabase
-              .from('subtasks')
-              .select('id')
-              .eq('task_id', request.meta.original_task_id);
-
-            if (fetchSubError) throw fetchSubError;
-
-            const dbSubsArray = dbSubtasks || [];
-            const draftSubtasks = request.meta.sub_tasks || [];
-
-            const subtasksToUpdate: any[] = [];
-            const subtasksToInsert: any[] = [];
-            const subtasksToDelete: any[] = [];
-
-            // Tạo map tìm kiếm nhanh subtask trong Database theo ID
-            const dbSubtaskMap = new Map();
-            dbSubsArray.forEach((dbSub: any) => {
-              dbSubtaskMap.set(dbSub.id, dbSub);
-            });
-
-            const seenDbIds = new Set<string>();
-
-            // Phân loại UPDATE và INSERT
-            draftSubtasks.forEach((st: any) => {
-              const matchedDbSub = dbSubtaskMap.get(st.id);
-
-              if (matchedDbSub) {
-                // Nhóm UPDATE: Có ID trùng khớp, tiến hành cập nhật content, assignee, estimated_minutes
-                subtasksToUpdate.push({
-                  id: matchedDbSub.id,
-                  content: st.content,
-                  assignee: st.assignee,
-                  estimated_minutes: Number(st.estimated_minutes) || 0,
-                  team_name: request.meta.team_name || ''
-                });
-                seenDbIds.add(matchedDbSub.id);
-              } else {
-                // Nhóm INSERT: Không thấy ID khớp, chèn mới subtask bản ghi kèm theo task_id 
-                subtasksToInsert.push({
-                  task_id: request.meta.original_task_id,
-                  content: st.content,
-                  assignee: st.assignee,
-                  estimated_minutes: Number(st.estimated_minutes) || 0,
-                  actual_minutes: 0,
-                  status: 'PENDING',
-                  team_name: request.meta.team_name || ''
-                });
-              }
-            });
-
-            // Phân loại DELETE: Những subtask cũ trong Database nay không còn xuất hiện trong nháp phê duyệt
-            dbSubsArray.forEach((dbSub: any) => {
-              if (!seenDbIds.has(dbSub.id)) {
-                if (!subtasksToDelete.find(d => d.id === dbSub.id)) {
-                  subtasksToDelete.push(dbSub);
-                }
-              }
-            });
-
-            // Thực thi chênh lệch Delta trên Supabase
-            if (subtasksToDelete.length > 0) {
-              const deleteIds = subtasksToDelete.map(d => d.id);
-              const { error: delErr } = await supabase
-                .from('subtasks')
-                .delete()
-                .in('id', deleteIds);
-              if (delErr) throw delErr;
-            }
-
-            if (subtasksToUpdate.length > 0) {
-              const updatePromises = subtasksToUpdate.map(sub => {
-                const { id, ...updateData } = sub;
-                return supabase
-                  .from('subtasks')
-                  .update(updateData)
-                  .eq('id', id);
-              });
-              const updateResults = await Promise.all(updatePromises);
-              const firstErr = updateResults.find(r => r.error);
-              if (firstErr) throw firstErr.error;
-            }
-
-            if (subtasksToInsert.length > 0) {
-              const { error: insErr } = await supabase
-                .from('subtasks')
-                .insert(subtasksToInsert);
-              if (insErr) throw insErr;
-            }
-
-            await logger.log(
-              'APPROVE_TASK_ACCEPTED', 
-              `Accepted and updated task template "${request.title}" suggested by user`, 
-              { title: request.title, originalTaskId: request.meta.original_task_id, originalRequestId: request.id }
-            );
-
-            toast.success(`Request accepted! Changes applied to task template "${request.title}".`);
-          } else {
-            // Insert into standard tasks list
-            const { data: newTasks, error: insertError } = await supabase
-              .from('tasks')
-              .insert([{
-                title: request.title,
-                task_name: request.title,
-                description: request.meta.note || '', // Cột description chỉ lưu text ghi chú thuần túy
-                task_type: request.task_type,
-                type: request.task_type,
-                status: 'ON',
-                is_active: true,
-                est_time: final_est_time,
-                actual_time: 0,
-                project_name: request.meta.project_name || '',
-                tag_name: request.meta.tag_name || '',
-                deadline_time: finalDeadlineTime,
-                deadline_days: deadlineDaysArray
-              }])
-              .select();
-
-            if (insertError) throw insertError;
-            if (!newTasks || newTasks.length === 0) {
-              throw new Error("Could not retrieve newly created task ID.");
-            }
-
-            const newTaskId = newTasks[0].id;
-
-            // Chèn toàn bộ các subtasks đi kèm vào bảng subtasks
-            const subtasksToInsert = (request.meta.sub_tasks || []).map((st: any) => ({
-              task_id: newTaskId,
-              content: st.content,
-              assignee: st.assignee,
-              estimated_minutes: Number(st.estimated_minutes) || 0,
-              actual_minutes: 0,
-              status: 'PENDING',
-              team_name: request.meta.team_name || ''
-            }));
-
-            if (subtasksToInsert.length > 0) {
-              const { error: insertSubError } = await supabase
-                .from('subtasks')
-                .insert(subtasksToInsert);
-              if (insertSubError) throw insertSubError;
-            }
-
-            await logger.log(
-              'APPROVE_TASK_ACCEPTED', 
-              `Accepted and created task profile "${request.title}" suggested by user`, 
-              { title: request.title, originalRequestId: request.id }
-            );
-
-            toast.success(`Request accepted! Task template "${request.title}" is now live in Task Manager.`);
-          }
-
-          // Cập nhật trạng thái bản ghi trong bảng approve_tasks thành 'APPROVED' thay vì xóa hẳn
-          const { error: updateRequestError } = await supabase
-            .from('approve_tasks')
-            .update({ status: 'APPROVED' })
-            .eq('id', request.id);
-
-          if (updateRequestError) throw updateRequestError;
-
-          setOpenedDrawerTask(null);
-          // Reload global tasks and approve requests list synchronously
-          await fetchTasks(true);
-          await loadRequests();
-        } catch (err: any) {
-          console.error('[ApproveTask] Error accepting request:', err);
-          toast.error(`Database Error: ${err.message || 'Could not approve request template'}`);
-        } finally {
-          setAcceptingId(null);
+    if (isEditRequest && isRecurring) {
+      const isScheduledToday = determineIsScheduledToday(request.task_type, request.meta.deadline_days);
+      setScopeDialogData({
+        request,
+        isRecurring: true,
+        isScheduledToday
+      });
+      setShowScopeDialog(true);
+    } else {
+      showConfirm({
+        title: isEditRequest ? 'Accept Edit - Approve Template Changes' : 'Accept Create - Approve & Create Task Template',
+        message: isEditRequest
+          ? `Are you sure you want to approve request "${request.title}"? This will apply these changes to the existing Task Manager template and delete this pending request.`
+          : `Are you sure you want to approve request "${request.title}"? This will copy this profile into the Active Task Manager list and delete this pending request.`,
+        confirmText: isEditRequest ? 'Accept Edit' : 'Accept Create',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          await executeAcceptRequest(request, 'FUTURE');
         }
-      }
-    });
+      });
+    }
   };
 
   const handleRejectRequest = (request: any, e?: React.MouseEvent) => {
@@ -875,6 +1031,7 @@ const ApproveTask: React.FC = () => {
 
   useEffect(() => {
     if (openedDrawerTask) {
+      setDrawerTab('details');
       const meta = parseTaskDescription(openedDrawerTask.description);
       if (meta.original_task_id) {
         supabase
@@ -1127,6 +1284,16 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
     );
   }
 
+  const historyVersions = useMemo(() => {
+    if (originalTask?.meta?.versions) {
+      return originalTask.meta.versions;
+    }
+    if (drawerParsedMeta?.versions) {
+      return drawerParsedMeta.versions;
+    }
+    return [];
+  }, [originalTask, drawerParsedMeta]);
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-white overflow-x-auto relative font-sans">
       
@@ -1189,7 +1356,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
           />
 
           {/* Filter Task Type */}
-          <FilterSelect 
+          <MultiTeamFilterSelect 
             value={filterTaskType}
             onChange={(val) => {
               setFilterTaskType(val);
@@ -1522,7 +1689,39 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Tab Switcher */}
+            <div className="flex border-b border-slate-100 shrink-0 bg-slate-50/50 p-1.5 gap-1 shadow-inner relative z-20">
+              <button
+                onClick={() => setDrawerTab('details')}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                  drawerTab === 'details'
+                    ? 'bg-white text-indigo-600 shadow-xs border border-slate-100/80 font-bold'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/40'
+                }`}
+              >
+                Details
+              </button>
+              <button
+                onClick={() => setDrawerTab('history')}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  drawerTab === 'history'
+                    ? 'bg-white text-indigo-600 shadow-xs border border-slate-100/80 font-bold'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/40'
+                }`}
+              >
+                <span>History</span>
+                {historyVersions.length > 0 && (
+                  <span className={`px-1.5 py-0.2 text-[9px] rounded-full font-bold ${
+                    drawerTab === 'history' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-200/85 text-slate-600'
+                  }`}>
+                    {historyVersions.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {drawerTab === 'details' ? (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex items-start justify-between">
                 <div>
                   <h2 
@@ -1741,6 +1940,120 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                 </div>
               </div>
             </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                {historyVersions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                    <History size={32} className="text-slate-300 stroke-[1.5] mb-2" />
+                    <span className="text-xs font-semibold text-slate-500">No version history</span>
+                    <p className="text-[11px] text-slate-400 max-w-[240px] mt-1 leading-normal">
+                      This task has not been edited or versioned yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3.5 pr-0.5 animate-in fade-in duration-200">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Revision Timeline ({historyVersions.length})
+                    </div>
+                    
+                    <div className="relative border-l-2 border-slate-200 pl-4 ml-1 space-y-5">
+                      {historyVersions.map((v: any, idx: number) => {
+                        const isExpanded = !!expandedVersions[idx];
+                        const subtasksCount = v.sub_tasks?.length || 0;
+                        return (
+                          <div key={idx} className="relative">
+                            {/* Dot indicator */}
+                            <span className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-500 ring-4 ring-white border border-indigo-600 block shrink-0" />
+                            
+                            <div className="bg-white border border-slate-150 rounded-xl p-3 shadow-xs hover:border-slate-300 transition-all">
+                              {/* Validity and Version badge row */}
+                              <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 mb-2 pb-1.5 border-b border-slate-100">
+                                <span className="font-semibold text-slate-600 flex items-center gap-1">
+                                  <Clock size={11} className="text-slate-400" />
+                                  {formatDisplayDate(v.valid_from)} ~ {formatDisplayDate(v.valid_until)}
+                                </span>
+                                <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.2 rounded font-bold border border-indigo-100">
+                                  Rev #{historyVersions.length - idx}
+                                </span>
+                              </div>
+
+                              {/* Title */}
+                              <h3 className="text-xs font-bold text-slate-800 leading-snug break-words">
+                                {v.title}
+                              </h3>
+
+                              {/* Tags Grid */}
+                              <div className="grid grid-cols-2 gap-1.5 mt-2.5 text-[10px]">
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Project</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">{v.project_name || 'N/A'}</span>
+                                </div>
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Team</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">{v.team_name || 'N/A'}</span>
+                                </div>
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Tag</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">{v.tag_name || 'N/A'}</span>
+                                </div>
+                                <div className="text-slate-500 bg-slate-50/50 p-1.5 rounded-lg border border-slate-100/50">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider">Deadline</span>
+                                  <span className="font-semibold text-slate-700 truncate block mt-0.5">
+                                    {v.deadline_time || '17:00'} ({formatDisplayDate(v.deadline_days)})
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Note / Description */}
+                              {v.description && (
+                                <div className="mt-2.5 bg-slate-50 rounded p-2 text-[11px] text-slate-600 border border-slate-100 leading-normal whitespace-pre-wrap break-words">
+                                  <span className="block text-[8px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">Link Note</span>
+                                  {v.description}
+                                </div>
+                              )}
+
+                              {/* Subtasks view */}
+                              {subtasksCount > 0 && (
+                                <div className="mt-3 pt-2.5 border-t border-slate-100">
+                                  <button
+                                    onClick={() => setExpandedVersions(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                                    className="flex items-center justify-between w-full text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
+                                  >
+                                    <span>Sub-tasks ({subtasksCount})</span>
+                                    {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                  </button>
+
+                                  {isExpanded && (
+                                    <div className="mt-2 space-y-1.5 animate-in fade-in duration-205">
+                                      {v.sub_tasks.map((st: any, sIdx: number) => (
+                                        <div key={sIdx} className="bg-slate-50 border border-slate-100 rounded-lg p-2 flex flex-col gap-1 text-[11px]">
+                                          <div className="flex items-start justify-between gap-1.5">
+                                            <span className="font-medium text-slate-700 break-words flex-1">{st.content}</span>
+                                            {st.assignee && (
+                                              <span className="bg-white border border-slate-200 text-slate-500 rounded px-1.5 py-0.2 shrink-0 font-medium scale-95">
+                                                {st.assignee}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="text-[10px] text-slate-400 font-mono flex justify-between pt-0.5 border-t border-slate-100/50">
+                                            <span>Est duration:</span>
+                                            <span className="font-semibold text-slate-650">{st.estimated_minutes} min</span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Accept / Reject actions block */}
             <div className="p-4 border-t border-slate-100 bg-slate-50 shrink-0 space-y-2">
@@ -1865,6 +2178,77 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                 className="px-3 h-8 text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded transition-colors flex items-center gap-1"
               >
                 {rejectingId === rejectDialogTask.id ? 'Rejecting...' : 'Reject request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Scope Selection Modal/Dialog for Approved Edits */}
+      {showScopeDialog && scopeDialogData && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-100 p-6 space-y-4 animate-in zoom-in-95 duration-150 text-left">
+            <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <span>Phạm vi phê duyệt chỉnh sửa</span>
+            </h4>
+            
+            <div className="text-xs text-slate-600 space-y-2 leading-relaxed">
+              <p>
+                Bạn đang phê duyệt thay đổi cho một <strong>Task định kỳ / lặp lại</strong> ({scopeDialogData.request.task_type}).
+              </p>
+              {scopeDialogData.isScheduledToday ? (
+                <div className="p-2.5 bg-green-50 border border-green-100 text-green-800 rounded-lg">
+                  Hôm nay ({getTodayDateString()}) là ngày lặp diễn ra của task này. Bạn có thể chọn chỉ áp dụng thay đổi cho duy nhất hôm nay hoặc áp dụng cho cả tương lai.
+                </div>
+              ) : (
+                <div className="p-2.5 bg-amber-50 border border-amber-100 text-amber-800 rounded-lg">
+                  Hôm nay ({getTodayDateString()}) <strong>không nằm trong lịch xuất hiện gốc</strong> của task này. Do đó, bạn chỉ có thể chọn áp dụng từ nay về sau.
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 space-y-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowScopeDialog(false);
+                  const req = scopeDialogData.request;
+                  setScopeDialogData(null);
+                  await executeAcceptRequest(req, 'FUTURE');
+                }}
+                className="w-full h-8 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all shadow-sm flex items-center justify-center gap-1 cursor-pointer"
+              >
+                Áp dụng từ hôm nay trở đi (Today & Future)
+              </button>
+
+              <button
+                type="button"
+                disabled={!scopeDialogData.isScheduledToday}
+                onClick={async () => {
+                  setShowScopeDialog(false);
+                  const req = scopeDialogData.request;
+                  setScopeDialogData(null);
+                  await executeAcceptRequest(req, 'TODAY_ONLY');
+                }}
+                className={`w-full h-8 px-4 text-xs font-semibold rounded-lg transition-all shadow-sm flex items-center justify-center gap-1 cursor-pointer border ${
+                  scopeDialogData.isScheduledToday
+                    ? 'text-slate-700 bg-white hover:bg-slate-50 border-slate-200'
+                    : 'text-slate-300 bg-slate-50 border-slate-100 cursor-not-allowed'
+                }`}
+                title={!scopeDialogData.isScheduledToday ? "Hôm nay không phải ngày diễn ra task này" : undefined}
+              >
+                Chỉ áp dụng duy nhất hôm nay (Today Only)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowScopeDialog(false);
+                  setScopeDialogData(null);
+                }}
+                className="w-full h-8 px-4 text-xs font-semibold text-slate-500 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all flex items-center justify-center cursor-pointer"
+              >
+                Hủy bỏ
               </button>
             </div>
           </div>

@@ -249,6 +249,18 @@ BEGIN
     BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.tags;
     EXCEPTION WHEN duplicate_object THEN NULL; END;
+
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.subtasks;
+    EXCEPTION WHEN duplicate_object THEN NULL; END;
+
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.task_logs;
+    EXCEPTION WHEN duplicate_object THEN NULL; END;
+
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.subtask_logs;
+    EXCEPTION WHEN duplicate_object THEN NULL; END;
 END $$;
 
 -- 12. Create Approve Tasks Table
@@ -276,3 +288,110 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;
     EXCEPTION WHEN duplicate_object THEN NULL; END;
 END $$;
+
+-- 13. Historical Snapshot Upgrades for Completed/Skipped Days
+-- Thêm các cột lưu snapshot thông tin Task lúc hoàn thành (Done/Skip)
+ALTER TABLE public.task_logs ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.task_logs ADD COLUMN IF NOT EXISTS project_name TEXT;
+ALTER TABLE public.task_logs ADD COLUMN IF NOT EXISTS tag_name TEXT;
+ALTER TABLE public.task_logs ADD COLUMN IF NOT EXISTS deadline_time TEXT;
+ALTER TABLE public.task_logs ADD COLUMN IF NOT EXISTS deadline_days TEXT;
+ALTER TABLE public.task_logs ADD COLUMN IF NOT EXISTS task_type TEXT;
+ALTER TABLE public.task_logs ADD COLUMN IF NOT EXISTS est_time INTEGER;
+
+-- Thêm các cột lưu snapshot thông tin Subtask lúc hoàn thành
+ALTER TABLE public.subtask_logs ADD COLUMN IF NOT EXISTS content TEXT;
+ALTER TABLE public.subtask_logs ADD COLUMN IF NOT EXISTS assignee TEXT;
+ALTER TABLE public.subtask_logs ADD COLUMN IF NOT EXISTS estimated_minutes INTEGER;
+
+-- Đổi ràng buộc khóa ngoại subtask_id trong subtask_logs từ ON DELETE CASCADE thành ON DELETE SET NULL
+-- Để khi admin xóa subtask trong bản mẫu, dữ liệu lịch sử log của subtask tại ngày đó vẫn còn nguyên giá trị snapshot.
+DO $$
+BEGIN
+    ALTER TABLE public.subtask_logs DROP CONSTRAINT IF EXISTS subtask_logs_subtask_id_fkey;
+    ALTER TABLE public.subtask_logs ADD CONSTRAINT subtask_logs_subtask_id_fkey 
+      FOREIGN KEY (subtask_id) REFERENCES public.subtasks(id) ON DELETE SET NULL;
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END $$;
+
+-- Backfill dữ liệu lịch sử cho các dòng cũ của task_logs và subtask_logs từ bản mẫu hiện tại một cách an toàn thông qua Dynamic SQL
+DO $$
+DECLARE
+    v_title_col TEXT := 'title';
+    v_type_col TEXT := 'type';
+    v_deadline_days_type TEXT;
+    v_sql TEXT;
+BEGIN
+    -- 1. Kiểm tra cột chứa tiêu đề task (title hoặc task_name)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'tasks' AND column_name = 'task_name'
+    ) THEN
+        v_title_col := 'task_name';
+    ELSIF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'tasks' AND column_name = 'title'
+    ) THEN
+        v_title_col := 'title';
+    END IF;
+
+    -- 2. Kiểm tra cột loại task (type hoặc task_type)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'tasks' AND column_name = 'task_type'
+    ) THEN
+        v_type_col := 'task_type';
+    ELSIF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'tasks' AND column_name = 'type'
+    ) THEN
+        v_type_col := 'type';
+    END IF;
+
+    -- 3. Kiểm tra kiểu dữ liệu của deadline_days (text hoặc text[])
+    SELECT data_type INTO v_deadline_days_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'tasks' AND column_name = 'deadline_days';
+
+    -- 4. Tạo và thực thi câu lệnh SQL UPDATE động cho task_logs
+    v_sql := 'UPDATE public.task_logs tl SET ' ||
+             '  title = COALESCE(tl.title, t.' || quote_ident(v_title_col) || '), ' ||
+             '  project_name = COALESCE(tl.project_name, t.project_name, ''''), ' ||
+             '  tag_name = COALESCE(tl.tag_name, t.tag_name, ''''), ' ||
+             '  deadline_time = COALESCE(tl.deadline_time, t.deadline_time::text, ''17:00''), ';
+
+    IF v_deadline_days_type = 'ARRAY' THEN
+        v_sql := v_sql || '  deadline_days = COALESCE(tl.deadline_days, array_to_string(t.deadline_days, '','')), ';
+    ELSE
+        v_sql := v_sql || '  deadline_days = COALESCE(tl.deadline_days, t.deadline_days::text), ';
+    END IF;
+
+    v_sql := v_sql || 
+             '  task_type = COALESCE(tl.task_type, t.' || quote_ident(v_type_col) || '::text), ' ||
+             '  est_time = COALESCE( ' ||
+             '    tl.est_time, ' ||
+             '    ( ' ||
+             '      SELECT COALESCE(SUM(st.estimated_minutes), 0) ' ||
+             '      FROM public.subtasks st ' ||
+             '      WHERE st.task_id = tl.task_id ' ||
+             '    ) ' ||
+             '  ) ' ||
+             'FROM public.tasks t ' ||
+             'WHERE tl.task_id = t.id ' ||
+             '  AND tl.title IS NULL;';
+
+    EXECUTE v_sql;
+
+    -- 5. Backfill cho subtask_logs
+    UPDATE public.subtask_logs sl
+    SET
+      content = COALESCE(sl.content, s.content, ''),
+      assignee = COALESCE(sl.assignee, s.assignee, ''),
+      estimated_minutes = COALESCE(sl.estimated_minutes, s.estimated_minutes, 0)
+    FROM public.subtasks s
+    WHERE sl.subtask_id = s.id
+      AND sl.content IS NULL;
+
+END $$;
+
