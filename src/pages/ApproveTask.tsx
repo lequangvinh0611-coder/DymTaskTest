@@ -151,7 +151,8 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
 
   return {
     ...defaultMeta,
-    description: String(rawDescription)
+    description: String(rawDescription),
+    note: String(rawDescription)
   };
 };
 
@@ -715,12 +716,25 @@ const ApproveTask: React.FC = () => {
             updatedVersions = [...updatedVersions, oldVersion];
           }
 
+          let descriptionValue = (request.meta.note || '').trim();
+          if (updatedVersions && updatedVersions.length > 0) {
+            descriptionValue = JSON.stringify({
+              project_name: request.meta.project_name || '',
+              team_name: request.meta.team_name || '',
+              tag_name: request.meta.tag_name || '',
+              note: (request.meta.note || '').trim(),
+              versions: updatedVersions,
+              last_updated_at: new Date().toISOString(),
+              last_updated_by: updaterName
+            });
+          }
+
           // Update tasks
           const { error: updateError } = await supabase
             .from('tasks')
             .update({
               title: request.title,
-              description: request.meta.note || '',
+              description: descriptionValue,
               task_type: request.task_type,
               est_time: final_est_time,
               project_name: request.meta.project_name || '',
@@ -1725,8 +1739,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
               <div className="flex items-start justify-between">
                 <div>
                   <h2 
-                    className={`text-sm font-semibold leading-tight ${isTitleChanged ? 'text-red-600 font-bold' : 'text-slate-800'}`}
-                    title={isTitleChanged ? `Original: ${oldTitle}` : undefined}
+                    className="text-sm font-semibold leading-tight text-slate-800"
                   >
                     {openedDrawerTask.title}
                   </h2>
@@ -1746,54 +1759,45 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
 
               <div className="grid grid-cols-2 gap-3 bg-slate-50 rounded-lg p-3 text-xs border border-slate-100">
                 <div 
-                  className={`space-y-0.5 p-1 rounded transition-colors ${isProjectChanged ? 'bg-red-50/40 border border-red-100/50' : ''}`}
-                  title={isProjectChanged ? `Original: ${oldProject}` : undefined}
+                  className="space-y-0.5 p-1 rounded transition-colors"
                 >
                   <span className="text-slate-400 font-medium block">Project</span>
-                  <span className={`block text-xs font-semibold truncate ${isProjectChanged ? 'text-red-600' : 'text-slate-700 hover:text-indigo-600 cursor-pointer transition-colors'}`}>{drawerParsedMeta.project_name}</span>
+                  <span className="block text-xs font-semibold truncate text-slate-700 hover:text-indigo-600 cursor-pointer transition-colors">{drawerParsedMeta.project_name}</span>
                 </div>
 
                 <div 
-                  className={`space-y-0.5 p-1 rounded transition-colors ${isTagChanged ? 'bg-red-50/40 border border-red-100/50' : ''}`}
-                  title={isTagChanged ? `Original: ${oldTag}` : undefined}
+                  className="space-y-0.5 p-1 rounded transition-colors"
                 >
                   <span className="text-slate-400 font-medium block">Tag</span>
-                  <span className={`block text-xs truncate ${isTagChanged ? 'text-red-600 font-semibold' : 'text-slate-700'}`}>{drawerParsedMeta.tag_name}</span>
+                  <span className="block text-xs truncate text-slate-700">{drawerParsedMeta.tag_name}</span>
                 </div>
 
                 <div 
-                  className={`space-y-0.5 p-1 rounded transition-colors ${isTeamChanged ? 'bg-red-50/40 border border-red-100/50' : ''}`}
-                  title={isTeamChanged ? `Original: ${oldTeam}` : undefined}
+                  className="space-y-0.5 p-1 rounded transition-colors"
                 >
                   <span className="text-slate-400 font-medium block">Team</span>
-                  <span className={`block text-xs truncate ${isTeamChanged ? 'text-red-600 font-semibold' : 'text-slate-700'}`}>{drawerParsedMeta.team_name}</span>
+                  <span className="block text-xs truncate text-slate-700">{drawerParsedMeta.team_name}</span>
                 </div>
 
                 <div 
-                  className={`space-y-0.5 p-1 rounded transition-colors ${
-                    (isTaskTypeChanged || isDeadlineDaysChanged) ? 'bg-red-50/40 border border-red-100/50' : ''
-                  }`}
-                  title={(isTaskTypeChanged || isDeadlineDaysChanged) ? `Original: ${oldTaskType}${oldDeadlineDays ? ` (${formatDisplayDate(oldDeadlineDays)})` : ''}` : undefined}
+                  className="space-y-0.5 p-1 rounded transition-colors"
                 >
                   <span className="text-slate-400 font-medium block">Frequency and repeat</span>
-                  <span className={`block text-xs font-semibold ${ (isTaskTypeChanged || isDeadlineDaysChanged) ? 'text-red-600 font-semibold' : 'text-slate-700'}`}>
+                  <span className="block text-xs font-semibold text-slate-700">
                     {openedDrawerTask.task_type}
                   </span>
                   {openedDrawerTask.deadline_days && (
-                    <span className={`block text-[11px] font-mono mt-0.5 leading-normal break-all ${ (isTaskTypeChanged || isDeadlineDaysChanged) ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
+                    <span className="block text-[11px] font-mono mt-0.5 leading-normal break-all text-slate-500">
                       ({formatDisplayDate(openedDrawerTask.deadline_days)})
                     </span>
                   )}
                 </div>
 
                 <div 
-                  className={`space-y-0.5 p-1 rounded transition-colors ${
-                    isDeadlineTimeChanged ? 'bg-red-50/40 border border-red-100/50' : ''
-                  }`}
-                  title={isDeadlineTimeChanged ? `Original: ${oldDeadlineTime}` : undefined}
+                  className="space-y-0.5 p-1 rounded transition-colors"
                 >
                   <span className="text-slate-400 font-medium block">Deadline time</span>
-                  <span className={`block text-xs truncate ${ isDeadlineTimeChanged ? 'text-red-600 font-semibold' : 'text-slate-700'}`}>
+                  <span className="block text-xs truncate text-slate-700">
                     {drawerParsedMeta.deadline_time || '17:00'}
                   </span>
                 </div>
@@ -1801,19 +1805,16 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
 
               {/* Notes display */}
               <div 
-                className={`note-section-wrapper bg-slate-50 border rounded-lg p-3 text-xs ${
-                  isNoteChanged ? 'is-note-changed border-red-200 bg-red-50/15' : 'border-slate-100/80'
-                }`}
-                title={isNoteChanged ? `Original: ${formatDisplayDate(oldNote)}` : undefined}
+                className="note-section-wrapper bg-slate-50 border border-slate-100/80 rounded-lg p-3 text-xs"
               >
-                <span className={`font-bold block uppercase tracking-wider text-[10px] ${isNoteChanged ? 'text-red-500' : 'text-slate-450'}`}>Reference Link Notes</span>
+                <span className="font-bold block uppercase tracking-wider text-[10px] text-slate-450">Reference Link Notes</span>
                 <div className="mt-1 font-medium leading-normal">
                   {(() => {
                     const noteStr = drawerParsedMeta.note || '';
                     if (!noteStr) return <span className="text-slate-400 italic">No notes/URLs entered</span>;
                     const trimmed = noteStr.trim();
                     const looksLikeUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://') || /^(www\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(trimmed);
-                    const textClass = isNoteChanged ? 'text-red-600 font-semibold' : 'text-slate-700';
+                    const textClass = 'text-slate-700';
                     if (looksLikeUrl) {
                       const href = trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`;
                       return (
@@ -1821,9 +1822,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                           href={href} 
                           target="_blank" 
                           rel="noopener noreferrer" 
-                          className={`hover:underline font-bold break-all inline-flex items-center gap-1 ${
-                            isNoteChanged ? 'text-red-600' : 'text-indigo-600 hover:text-indigo-800'
-                          }`}
+                          className="hover:underline font-bold break-all inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800"
                         >
                           {formatDisplayDate(trimmed)}
                         </a>
@@ -1862,54 +1861,33 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                       const isModified = sub.status === 'modified';
                       const isAdded = sub.status === 'added';
 
-                      let contentClass = "text-xs font-medium leading-normal";
-                      let assigneeClass = "text-[10px] sm:text-xs rounded px-1.5 py-0.5 ml-auto shrink-0 font-medium border";
-                      let minutesClass = "font-medium";
+                      let contentClass = "text-xs font-medium leading-normal text-slate-700";
+                      let assigneeClass = "text-[10px] sm:text-xs rounded px-1.5 py-0.5 ml-auto shrink-0 font-medium border bg-slate-50 text-slate-500 border-slate-100";
+                      let minutesClass = "font-medium text-slate-700";
                       let boxClass = "border transition-all rounded-lg p-3 flex flex-col justify-between gap-2 relative shadow-xs animate-in fade-in";
 
                       if (isDeleted) {
-                        boxClass += " border-red-200 bg-red-10/10 text-red-500 line-through";
-                        contentClass += " text-red-500 line-through";
-                        assigneeClass += " bg-red-50 text-red-500 border-red-100 line-through";
-                        minutesClass += " text-red-500 line-through";
-                      } else if (isModified) {
-                        boxClass += " border-amber-200 bg-white";
-                        contentClass += sub.hasContentChanged ? " text-red-600 font-semibold" : " text-slate-700";
-                        assigneeClass += sub.hasAssigneeChanged ? " bg-red-50 text-red-600 border-red-200 font-semibold" : " bg-slate-50 text-slate-500 border-slate-100";
-                        minutesClass += sub.hasMinutesChanged ? " text-red-600 font-semibold" : " text-slate-700";
-                      } else if (isAdded) {
-                        boxClass += " border-emerald-100 bg-emerald-50/10";
-                        contentClass += " text-emerald-700 font-medium";
-                        assigneeClass += " bg-emerald-50 text-emerald-600 border-emerald-150";
-                        minutesClass += " text-emerald-600";
+                        boxClass += " border-slate-150 bg-slate-50/50 text-slate-400 line-through";
+                        contentClass = "text-xs font-medium leading-normal text-slate-400 line-through";
+                        assigneeClass = "text-[10px] sm:text-xs rounded px-1.5 py-0.5 ml-auto shrink-0 font-medium border bg-slate-50 text-slate-400 border-slate-100 line-through";
+                        minutesClass = "font-medium text-slate-400 line-through";
                       } else {
                         boxClass += " border-slate-100 hover:border-blue-100 bg-white hover:bg-blue-50/10";
-                        contentClass += " text-slate-700";
-                        assigneeClass += " bg-slate-50 text-slate-500 border-slate-100";
-                        minutesClass += " text-slate-700";
                       }
-
-                      const contentTooltip = sub.hasContentChanged ? `Original content: ${sub.oldContent}` : undefined;
-                      const assigneeTooltip = sub.hasAssigneeChanged ? `Original assignee: ${sub.oldAssignee}` : undefined;
-                      const minutesTooltip = sub.hasMinutesChanged ? `Original est minutes: ${sub.oldEstimatedMinutes} min` : undefined;
-                      const boxTooltip = isDeleted ? "This subtask was deleted in this edit" : isAdded ? "This subtask was added in this edit" : undefined;
 
                       return (
                         <div 
                           key={sub.id || idx}
                           className={boxClass}
-                          title={boxTooltip}
                         >
                           <div className="flex items-center gap-2 flex-wrap">
                             <span 
                               className={contentClass}
-                              title={contentTooltip}
                             >
                               {sub.content}
                             </span>
                             <span 
                               className={assigneeClass}
-                              title={assigneeTooltip}
                             >
                               {sub.assignee}
                             </span>
@@ -1919,7 +1897,6 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                               <span>Estimated</span>
                               <span 
                                 className={minutesClass}
-                                title={minutesTooltip}
                               >
                                 {sub.estimated_minutes} min
                               </span>
