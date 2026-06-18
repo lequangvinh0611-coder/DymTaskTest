@@ -45,7 +45,14 @@ export default function App() {
         };
       };
 
-      const debouncedFetchAll = debounce(() => {
+      const debouncedFetchDailyOnly = debounce(() => {
+        const state = useAppStore.getState();
+        if (state.startDate) {
+          state.fetchDailyTasks(state.startDate, state.endDate, true);
+        }
+      }, 300);
+
+      const debouncedFetchTemplatesAndDaily = debounce(() => {
         fetchTasks(true);
         const state = useAppStore.getState();
         if (state.startDate) {
@@ -67,16 +74,16 @@ export default function App() {
 
         const channel = supabase.channel('global_app_realtime_sync')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
-            debouncedFetchAll();
+            debouncedFetchTemplatesAndDaily();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => {
-            debouncedFetchAll();
+            debouncedFetchTemplatesAndDaily();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, () => {
-            debouncedFetchAll();
+            debouncedFetchDailyOnly();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, () => {
-            debouncedFetchAll();
+            debouncedFetchDailyOnly();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
             debouncedFetchMetadata();

@@ -481,6 +481,10 @@ const ApproveTask: React.FC = () => {
         deadlineDaysArray = request.meta.deadline_days;
       }
 
+      const finalDeadlineDays = typeof request.meta.deadline_days === 'string'
+        ? request.meta.deadline_days
+        : (Array.isArray(request.meta.deadline_days) ? request.meta.deadline_days.join(', ') : 'Mon - Fri');
+
       // 3. Parse and normalize deadline time (24-hour style hh:mm:ss)
       const deadlineTimeRaw = request.meta.deadline_time || '';
       let finalDeadlineTime = null;
@@ -718,12 +722,11 @@ const ApproveTask: React.FC = () => {
               title: request.title,
               description: request.meta.note || '',
               task_type: request.task_type,
-              type: request.task_type,
               est_time: final_est_time,
               project_name: request.meta.project_name || '',
               tag_name: request.meta.tag_name || '',
               deadline_time: finalDeadlineTime,
-              deadline_days: deadlineDaysArray
+              deadline_days: finalDeadlineDays
             })
             .eq('id', request.meta.original_task_id);
 
@@ -818,7 +821,6 @@ const ApproveTask: React.FC = () => {
             title: request.title,
             description: request.meta.note || '',
             task_type: request.task_type,
-            type: request.task_type,
             status: 'ON',
             is_active: true,
             est_time: final_est_time,
@@ -826,7 +828,7 @@ const ApproveTask: React.FC = () => {
             project_name: request.meta.project_name || '',
             tag_name: request.meta.tag_name || '',
             deadline_time: finalDeadlineTime,
-            deadline_days: deadlineDaysArray
+            deadline_days: finalDeadlineDays
           }])
           .select();
 
