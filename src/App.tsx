@@ -53,13 +53,6 @@ export default function App() {
         }
       }, 300);
 
-      const debouncedFetchDailyOnly = debounce(() => {
-        const state = useAppStore.getState();
-        if (state.startDate) {
-          state.fetchDailyTasks(state.startDate, state.endDate, true);
-        }
-      }, 300);
-
       const debouncedFetchMetadata = debounce(() => {
         fetchMetadata(true);
       }, 300);
@@ -80,10 +73,10 @@ export default function App() {
             debouncedFetchAll();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, () => {
-            debouncedFetchDailyOnly();
+            debouncedFetchAll();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, () => {
-            debouncedFetchDailyOnly();
+            debouncedFetchAll();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
             debouncedFetchMetadata();
