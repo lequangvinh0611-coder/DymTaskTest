@@ -326,6 +326,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         .from('tasks')
         .select(`
           *,
+          projects(name),
+          tags(name),
+          teams(name),
           subtasks(*),
           task_logs(*),
           subtask_logs(*)
@@ -342,18 +345,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
         const task = { ...tRaw, subtasks: uniqueSubs };
         
-        // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
+        // Assemble metadata ảo từ cột thực tế trong DB hoặc quan hệ DB RDBMS để tương thích ngược 100% với UI
         const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
-        const projName = task.project_name || '';
-        const tagName = task.tag_name || '';
-        const teamName = task.team_name || firstTeamName;
+        const projName = task.project_name || (task.projects as any)?.name || '';
+        const tagName = task.tag_name || (task.tags as any)?.name || '';
+        const teamName = task.team_name || (task.teams as any)?.name || firstTeamName;
 
         const parsedDesc = parseTaskDescriptionLocal(task.description);
         const meta = {
           project_name: projName,
           team_name: teamName,
           tag_name: tagName,
-          note: parsedDesc.note,
+          note: parsedDesc.note || (typeof task.description === 'string' ? task.description : ''),
           versions: parsedDesc.versions || []
         };
         const completions: Record<string, any> = {};
@@ -480,6 +483,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         .from('tasks')
         .select(`
           *,
+          projects(name),
+          tags(name),
+          teams(name),
           subtasks(*)
         `);
 
@@ -513,18 +519,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
         const task = { ...tRaw, subtasks: uniqueSubs };
         
-        // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
+        // Assemble metadata ảo từ cột thực tế trong DB hoặc quan hệ DB RDBMS để tương thích ngược 100% với UI
         const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
-        const projName = task.project_name || '';
-        const tagName = task.tag_name || '';
-        const teamName = task.team_name || firstTeamName;
+        const projName = task.project_name || (task.projects as any)?.name || '';
+        const tagName = task.tag_name || (task.tags as any)?.name || '';
+        const teamName = task.team_name || (task.teams as any)?.name || firstTeamName;
 
         const parsedDesc = parseTaskDescriptionLocal(task.description);
         const meta = {
           project_name: projName,
           team_name: teamName,
           tag_name: tagName,
-          note: parsedDesc.note,
+          note: parsedDesc.note || (typeof task.description === 'string' ? task.description : ''),
           versions: parsedDesc.versions || []
         };
 
