@@ -605,11 +605,19 @@ const TaskManager: React.FC = () => {
 
   const handleQuickApprove = (task: DbTask) => {
     const meta = parseTaskDescription(task.description) as any;
+    const mappedSubtasks = ((task as any).subtasks || []).map((st: any) => ({
+      id: st.id,
+      content: st.content,
+      assignee: st.assignee,
+      estimated_minutes: st.estimated_minutes
+    }));
+    meta.sub_tasks = mappedSubtasks;
+    
     // Update last updated info
     meta.last_updated_by = profile?.name || 'Unknown';
     meta.last_updated_at = new Date().toISOString();
 
-    const tempApproveTask: DbApproveTask = {
+    const tempApproveTask: DbApproveTask & { sub_tasks?: any[] } = {
       id: task.id,
       title: task.title,
       description: meta,
@@ -618,7 +626,8 @@ const TaskManager: React.FC = () => {
       est_time: task.est_time,
       actual_time: task.actual_time,
       user_id: profile?.id || undefined,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sub_tasks: mappedSubtasks
     };
 
     setApproveTaskToClone(tempApproveTask);
@@ -629,11 +638,19 @@ const TaskManager: React.FC = () => {
 
   const handleOpenApproveEditModal = (task: DbTask) => {
     const meta = parseTaskDescription(task.description) as any;
+    const mappedSubtasks = ((task as any).subtasks || []).map((st: any) => ({
+      id: st.id,
+      content: st.content,
+      assignee: st.assignee,
+      estimated_minutes: st.estimated_minutes
+    }));
+    meta.sub_tasks = mappedSubtasks;
+
     // Update last updated info
     meta.last_updated_by = profile?.name || 'Unknown';
     meta.last_updated_at = new Date().toISOString();
 
-    const tempApproveTask: DbApproveTask = {
+    const tempApproveTask: DbApproveTask & { sub_tasks?: any[] } = {
       id: task.id,
       title: task.title,
       description: meta,
@@ -642,7 +659,8 @@ const TaskManager: React.FC = () => {
       est_time: task.est_time,
       actual_time: task.actual_time,
       user_id: profile?.id || undefined,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      sub_tasks: mappedSubtasks
     };
 
     setApproveTaskToClone(tempApproveTask);

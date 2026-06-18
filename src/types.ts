@@ -349,11 +349,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         const teamName = task.team_name || firstTeamName;
 
         const parsedDesc = parseTaskDescriptionLocal(task.description);
+        const sub_tasks = (task.subtasks || []).map((st: any) => ({
+          id: st.id,
+          content: st.content,
+          assignee: st.assignee,
+          estimated_minutes: st.estimated_minutes
+        }));
         const meta = {
           project_name: projName,
           team_name: teamName,
           tag_name: tagName,
           note: parsedDesc.note,
+          sub_tasks,
           versions: parsedDesc.versions || []
         };
         const completions: Record<string, any> = {};

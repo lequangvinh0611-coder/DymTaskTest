@@ -608,6 +608,12 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [isQuickSkipMode, setIsQuickSkipMode] = useState(false);
   const [isQuickSubmitMode, setIsQuickSubmitMode] = useState(false);
+  const [isAllPagesSelected, setIsAllPagesSelected] = useState(false);
+
+  useEffect(() => {
+    setSelectedTaskIds(new Set());
+    setIsAllPagesSelected(false);
+  }, [searchQuery, filterAssignee, filterTag, filterProject, filterTeam, filterTodoStatus, page]);
 
   // Drawer slider panel
   const [openedTask, setOpenedTask] = useState<VirtualTask | null>(null);
@@ -1117,6 +1123,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       const next = new Set(prev);
       if (next.has(virtualId)) {
         next.delete(virtualId);
+        setIsAllPagesSelected(false);
       } else {
         next.add(virtualId);
       }
@@ -1127,8 +1134,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   const handleToggleSelectAll = () => {
     if (selectedTaskIds.size === paginatedTasks.length) {
       setSelectedTaskIds(new Set());
+      setIsAllPagesSelected(false);
     } else {
       setSelectedTaskIds(new Set(paginatedTasks.map(t => t.virtual_id)));
+      setIsAllPagesSelected(false);
     }
   };
 
@@ -2548,20 +2557,56 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             <p className="text-xs text-slate-400 font-medium animate-pulse">Loading checklist...</p>
           </div>
         ) : paginatedTasks.length > 0 ? (
-          <table className="w-full text-left border-collapse table-fixed select-none min-w-[1350px]">
-            <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-20">
-              <tr className="h-8">
-                {(isQuickSkipMode || isQuickSubmitMode) && (
-                  <th className="w-[4%] px-3 text-center bg-slate-100">
-                    <button onClick={handleToggleSelectAll} className="text-slate-400 hover:text-indigo-600 transition-colors">
-                      {selectedTaskIds.size === paginatedTasks.length ? (
-                        <CheckSquare size={14} className="text-indigo-600 mx-auto" />
-                      ) : (
-                        <Square size={14} className="mx-auto" />
-                      )}
+          <>
+            {/* Gmail-style select-all banner */}
+            {(isQuickSkipMode || isQuickSubmitMode) && selectedTaskIds.size >= paginatedTasks.length && filteredTasks.length > paginatedTasks.length && (
+              <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 text-center text-xs text-indigo-700 font-medium sticky left-0 right-0 z-30">
+                {!isAllPagesSelected ? (
+                  <span>
+                    Tất cả <strong>{paginatedTasks.length}</strong> task trên trang này đã được chọn.{" "}
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setSelectedTaskIds(new Set(filteredTasks.map(t => t.virtual_id)));
+                        setIsAllPagesSelected(true);
+                      }}
+                      className="underline text-indigo-800 hover:text-indigo-950 font-bold ml-1 cursor-pointer transition-colors"
+                    >
+                      Chọn tất cả {filteredTasks.length} task trong danh sách
                     </button>
-                  </th>
+                  </span>
+                ) : (
+                  <span>
+                    Đã chọn tất cả <strong>{filteredTasks.length}</strong> task trong danh sách.{" "}
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setSelectedTaskIds(new Set(paginatedTasks.map(t => t.virtual_id)));
+                        setIsAllPagesSelected(false);
+                      }}
+                      className="underline text-indigo-800 hover:text-indigo-950 font-bold ml-1 cursor-pointer transition-colors"
+                    >
+                      Xóa lựa chọn (chỉ giữ {paginatedTasks.length} task của trang hiện tại)
+                    </button>
+                  </span>
                 )}
+              </div>
+            )}
+
+            <table className="w-full text-left border-collapse table-fixed select-none min-w-[1350px]">
+              <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-20">
+                <tr className="h-8">
+                  {(isQuickSkipMode || isQuickSubmitMode) && (
+                    <th className="w-[4%] px-3 text-center bg-slate-100">
+                      <button onClick={handleToggleSelectAll} className="text-slate-400 hover:text-indigo-600 transition-colors">
+                        {(selectedTaskIds.size >= paginatedTasks.length && selectedTaskIds.size > 0) ? (
+                          <CheckSquare size={14} className="text-indigo-600 mx-auto" />
+                        ) : (
+                          <Square size={14} className="mx-auto" />
+                        )}
+                      </button>
+                    </th>
+                  )}
                 <th className={`${(isQuickSkipMode || isQuickSubmitMode) ? 'w-[4%]' : 'w-[5%]'} px-3 text-[11px] uppercase tracking-wider font-bold text-slate-500 bg-slate-100`}>Id</th>
                 <th className={`${(isQuickSkipMode || isQuickSubmitMode) ? 'w-[15%]' : 'w-[18%]'} px-3 text-[11px] uppercase tracking-wider font-bold text-slate-500 bg-slate-100`}>Task Name</th>
                 <th className="w-[11%] px-3 text-[11px] uppercase tracking-wider font-bold text-slate-500 bg-slate-100">Project</th>
@@ -2750,6 +2795,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               })}
             </tbody>
           </table>
+          </>
         ) : (
           <div className="py-24 flex flex-col items-center justify-center text-center">
             <div className="p-4 bg-slate-50 rounded-full mb-3 text-slate-300">
