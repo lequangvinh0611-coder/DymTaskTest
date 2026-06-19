@@ -699,22 +699,28 @@ const ApproveTask: React.FC = () => {
             ? latestMeta.last_updated_at.split('T')[0]
             : (originalTask.created_at ? originalTask.created_at.split('T')[0] : todayStr);
 
-          if (current_valid_from <= yesterdayStr) {
-            const oldVersion = {
-              valid_from: current_valid_from,
-              valid_until: yesterdayStr,
-              title: originalTask.title,
-              description: latestMeta.description || '',
-              project_name: latestMeta.project_name,
-              team_name: latestMeta.team_name,
-              tag_name: latestMeta.tag_name,
-              deadline_time: latestMeta.deadline_time,
-              deadline_days: latestMeta.deadline_days,
-              est_time: originalTask.est_time,
-              sub_tasks: latestMeta.sub_tasks || []
-            };
-            updatedVersions = [...updatedVersions, oldVersion];
-          }
+          // Always add original state to version history during an Approved Edit so history is NEVER lost
+          const oldVersion = {
+            valid_from: current_valid_from,
+            valid_until: todayStr,
+            title: originalTask.task_name || originalTask.title || '',
+            description: latestMeta.note || latestMeta.description || '',
+            project_name: originalTask.project_name || latestMeta.project_name || '',
+            team_name: originalTask.team_name || latestMeta.team_name || '',
+            tag_name: originalTask.tag_name || latestMeta.tag_name || '',
+            deadline_time: originalTask.deadline_time || latestMeta.deadline_time || '',
+            deadline_days: Array.isArray(originalTask.deadline_days)
+              ? originalTask.deadline_days.join(', ')
+              : String(originalTask.deadline_days || latestMeta.deadline_days || ''),
+            est_time: Number(originalTask.estimated_minutes) || Number(originalTask.est_time) || 0,
+            sub_tasks: (originalTask.subtasks || latestMeta.sub_tasks || []).map((st: any) => ({
+              id: st.id,
+              content: st.content,
+              assignee: st.assignee,
+              estimated_minutes: st.estimated_minutes
+            }))
+          };
+          updatedVersions = [...updatedVersions, oldVersion];
 
           let descriptionValue = (request.meta.note || '').trim();
           if (updatedVersions && updatedVersions.length > 0) {
@@ -734,13 +740,17 @@ const ApproveTask: React.FC = () => {
             .from('tasks')
             .update({
               title: request.title,
+              task_name: request.title,
               description: descriptionValue,
               task_type: request.task_type,
+              type: request.task_type,
               est_time: final_est_time,
+              estimated_minutes: final_est_time,
               project_name: request.meta.project_name || '',
               tag_name: request.meta.tag_name || '',
+              team_name: request.meta.team_name || '',
               deadline_time: finalDeadlineTime,
-              deadline_days: finalDeadlineDays
+              deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays]
             })
             .eq('id', request.meta.original_task_id);
 
@@ -833,16 +843,21 @@ const ApproveTask: React.FC = () => {
           .from('tasks')
           .insert([{
             title: request.title,
+            task_name: request.title,
             description: request.meta.note || '',
             task_type: request.task_type,
+            type: request.task_type,
             status: 'ON',
             is_active: true,
             est_time: final_est_time,
+            estimated_minutes: final_est_time,
             actual_time: 0,
+            actual_minutes: 0,
             project_name: request.meta.project_name || '',
             tag_name: request.meta.tag_name || '',
+            team_name: request.meta.team_name || '',
             deadline_time: finalDeadlineTime,
-            deadline_days: finalDeadlineDays
+            deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays]
           }])
           .select();
 
@@ -877,13 +892,13 @@ const ApproveTask: React.FC = () => {
         toast.success(`Request accepted! Task template "${request.title}" is now live in Task Manager.`);
       }
 
-      // 4. Update the state of request to APPROVED
-      const { error: updateRequestError } = await supabase
+      // 4. Delete the approved request from approve_tasks
+      const { error: deleteRequestError } = await supabase
         .from('approve_tasks')
-        .update({ status: 'APPROVED' })
+        .delete()
         .eq('id', request.id);
 
-      if (updateRequestError) throw updateRequestError;
+      if (deleteRequestError) throw deleteRequestError;
 
       setOpenedDrawerTask(null);
       // 5. Synchronize App store
@@ -1299,13 +1314,38 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
   }
 
   const historyVersions = useMemo(() => {
-    if (originalTask?.meta?.versions) {
-      return originalTask.meta.versions;
+    let list: any[] = [];
+    if (originalTask?.meta?.versions && originalTask.meta.versions.length > 0) {
+      list = [...originalTask.meta.versions];
+    } else if (drawerParsedMeta?.versions && drawerParsedMeta.versions.length > 0) {
+      list = [...drawerParsedMeta.versions];
     }
-    if (drawerParsedMeta?.versions) {
-      return drawerParsedMeta.versions;
+
+    if (originalTask) {
+      // Synthesize the original task's live version
+      const liveVer = {
+        valid_from: originalTask.created_at ? originalTask.created_at.split('T')[0] : 'N/A',
+        valid_until: 'Present (Current Active)',
+        title: originalTask.task_name || originalTask.title || '',
+        description: originalTask.meta?.note || originalTask.description || '',
+        project_name: originalTask.project_name || '',
+        team_name: originalTask.team_name || '',
+        tag_name: originalTask.tag_name || '',
+        deadline_time: originalTask.deadline_time || '',
+        deadline_days: Array.isArray(originalTask.deadline_days)
+          ? originalTask.deadline_days.join(', ')
+          : String(originalTask.deadline_days || ''),
+        est_time: Number(originalTask.estimated_minutes) || Number(originalTask.est_time) || 0,
+        sub_tasks: (originalTask.subtasks || []).map((st: any) => ({
+          content: st.content,
+          assignee: st.assignee,
+          estimated_minutes: st.estimated_minutes
+        }))
+      };
+      // Prepend current active live version to timeline
+      list = [liveVer, ...list];
     }
-    return [];
+    return list;
   }, [originalTask, drawerParsedMeta]);
 
   return (
