@@ -535,7 +535,7 @@ const ApproveTask: React.FC = () => {
 
       const isEditRequest = !!request.meta?.original_task_id;
       const calculated_request_est_time = (request.meta.sub_tasks || []).reduce(
-        (sum: number, s: any) => sum + (Number(s.estimated_minutes) || 0), 
+        (sum: number, s: any) => sum + (Number(s.estimated_minutes) || Number(s.est_time) || 0), 
         0
       );
       const final_est_time = request.est_time || calculated_request_est_time;
@@ -583,7 +583,7 @@ const ApproveTask: React.FC = () => {
             task_type: request.task_type,
             est_time: final_est_time,
             updated_by: updaterName,
-            actual_minutes: existingLog ? (existingLog.actual_minutes || 0) : 0
+            actual_time: existingLog ? (existingLog.actual_time !== undefined ? existingLog.actual_time : existingLog.actual_minutes || 0) : 0
           };
 
           // Upsert the task log
@@ -627,12 +627,12 @@ const ApproveTask: React.FC = () => {
               todo_date: todayStr,
               content: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes,
+              est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
               team_name: request.meta.team_name || '',
               is_completed: matchedLog ? matchedLog.is_completed : false,
               status: matchedLog ? (matchedLog.status || 'NEW') : 'NEW',
               completed_by: matchedLog ? matchedLog.completed_by : null,
-              actual_minutes: matchedLog ? (matchedLog.actual_minutes || 0) : 0
+              actual_time: matchedLog ? (matchedLog.actual_time !== undefined ? matchedLog.actual_time : matchedLog.actual_minutes || 0) : 0
             };
           });
 
@@ -652,6 +652,12 @@ const ApproveTask: React.FC = () => {
         } else {
           // --- FUTURE: Standard Template and Subtasks Delta sync ---
           const latestMeta = parseTaskDescription(originalTask.description);
+          
+          // Fetch actual live subtasks of the original task template to preserve in oldVersion history
+          const { data: originalSubs } = await supabase
+            .from('subtasks')
+            .select('*')
+            .eq('task_id', request.meta.original_task_id);
           
           mergedCompletions = latestMeta.completions || {};
           mergedOnetimeTargets = latestMeta.onetime_targets || [];
@@ -739,7 +745,7 @@ const ApproveTask: React.FC = () => {
               ? originalTask.deadline_days.join(', ')
               : String(originalTask.deadline_days || latestMeta.deadline_days || ''),
             est_time: Number(originalTask.estimated_minutes) || Number(originalTask.est_time) || 0,
-            sub_tasks: (originalTask.subtasks || latestMeta.sub_tasks || []).map((st: any) => ({
+            sub_tasks: (originalSubs || latestMeta.sub_tasks || []).map((st: any) => ({
               id: st.id,
               content: st.content,
               assignee: st.assignee,
@@ -766,13 +772,14 @@ const ApproveTask: React.FC = () => {
             .from('tasks')
             .update({
               title: request.title,
-              description: descriptionValue,
+              note: (request.meta.note || '').trim(),
               task_type: request.task_type,
               est_time: final_est_time,
               project_name: request.meta.project_name || '',
               tag_name: request.meta.tag_name || '',
               deadline_time: finalDeadlineTime,
-              deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays]
+              deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays],
+              history: request.history || updatedVersions
             })
             .eq('id', request.meta.original_task_id);
 
@@ -805,7 +812,7 @@ const ApproveTask: React.FC = () => {
                 id: matchedDbSub.id,
                 content: st.content,
                 assignee: st.assignee,
-                estimated_minutes: Number(st.estimated_minutes) || 0,
+                est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
                 team_name: request.meta.team_name || ''
               });
               seenDbIds.add(matchedDbSub.id);
@@ -814,8 +821,7 @@ const ApproveTask: React.FC = () => {
                 task_id: request.meta.original_task_id,
                 content: st.content,
                 assignee: st.assignee,
-                estimated_minutes: Number(st.estimated_minutes) || 0,
-                actual_minutes: 0,
+                est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
                 status: 'PENDING',
                 team_name: request.meta.team_name || ''
               });
@@ -865,16 +871,16 @@ const ApproveTask: React.FC = () => {
           .from('tasks')
           .insert([{
             title: request.title,
-            description: request.meta.note || '',
+            note: request.meta.note || '',
             task_type: request.task_type,
             status: 'ON',
             is_active: true,
             est_time: final_est_time,
-            actual_time: 0,
             project_name: request.meta.project_name || '',
             tag_name: request.meta.tag_name || '',
             deadline_time: finalDeadlineTime,
-            deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays]
+            deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays],
+            history: request.history || []
           }])
           .select();
 
@@ -889,8 +895,7 @@ const ApproveTask: React.FC = () => {
           task_id: newTaskId,
           content: st.content,
           assignee: st.assignee,
-          estimated_minutes: Number(st.estimated_minutes) || 0,
-          actual_minutes: 0,
+          est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
           status: 'PENDING',
           team_name: request.meta.team_name || ''
         }));
@@ -1332,7 +1337,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
 
   const historyVersions = useMemo(() => {
     let list: any[] = [];
-    if (originalTask?.meta?.versions && originalTask.meta.versions.length > 0) {
+    if (openedDrawerTask && Array.isArray((openedDrawerTask as any).history) && (openedDrawerTask as any).history.length > 0) {
+      list = [...(openedDrawerTask as any).history];
+    } else if (originalTask?.meta?.versions && originalTask.meta.versions.length > 0) {
       list = [...originalTask.meta.versions];
     } else if (drawerParsedMeta?.versions && drawerParsedMeta.versions.length > 0) {
       list = [...drawerParsedMeta.versions];
@@ -1356,14 +1363,14 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         sub_tasks: (originalTask.subtasks || []).map((st: any) => ({
           content: st.content,
           assignee: st.assignee,
-          estimated_minutes: st.estimated_minutes
+          estimated_minutes: st.est_time !== undefined ? st.est_time : (st.estimated_minutes || 0)
         }))
       };
       // Prepend current active live version to timeline
       list = [liveVer, ...list];
     }
     return list;
-  }, [originalTask, drawerParsedMeta]);
+  }, [originalTask, drawerParsedMeta, openedDrawerTask]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-white overflow-x-auto relative font-sans">

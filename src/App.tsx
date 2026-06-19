@@ -53,19 +53,19 @@ export default function App() {
       }, 300);
 
       const debouncedFetchTemplatesAndDaily = debounce(() => {
-        fetchTasks(true);
         const state = useAppStore.getState();
+        state.fetchTasks(true);
         if (state.startDate) {
           state.fetchDailyTasks(state.startDate, state.endDate, true);
         }
       }, 300);
 
       const debouncedFetchMetadata = debounce(() => {
-        fetchMetadata(true);
+        useAppStore.getState().fetchMetadata(true);
       }, 300);
 
       const debouncedFetchApproveTasks = debounce(() => {
-        fetchApproveTasks(true);
+        useAppStore.getState().fetchApproveTasks(true);
       }, 300);
 
       // Hàm đăng ký realtime đồng bộ dữ liệu toàn cục

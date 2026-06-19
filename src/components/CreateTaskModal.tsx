@@ -717,16 +717,16 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
       // Construct compliant RDBMS payload with matching properties for schema compatibility
       const payload = {
         title: taskName.trim(),
-        description: descriptionValue,
+        note: note.trim(), // renamed from description
         task_type: taskType,
         est_time: totalEstMinutes,
         status: hasUnfinishedTarget ? 'ON' : 'OFF',
         is_active: !!hasUnfinishedTarget,
-        actual_time: isEditMode && taskToEdit ? taskToEdit.actual_time : 0,
         project_name: project || '',
         tag_name: tag || '',
         deadline_time: deadlineTime24h ? (deadlineTime24h.includes(':') && deadlineTime24h.split(':').length === 2 ? `${deadlineTime24h}:00` : deadlineTime24h) : null,
-        deadline_days: computedDeadlineDays
+        deadline_days: computedDeadlineDays,
+        history: updatedVersions
       };
 
       if (isEditMode && taskToEdit && taskType !== 'ONETIME' && scope === 'TODAY_ONLY') {
@@ -755,7 +755,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           task_type: taskType,
           est_time: totalEstMinutes,
           updated_by: updaterName,
-          actual_minutes: existingLog ? (existingLog.actual_minutes || 0) : 0
+          actual_time: existingLog ? (existingLog.actual_time !== undefined ? existingLog.actual_time : existingLog.actual_minutes || 0) : 0
         };
 
         // Upsert the task log
@@ -799,12 +799,12 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
             todo_date: todayStr,
             content: st.content,
             assignee: st.assignee,
-            estimated_minutes: st.estimated_minutes,
+            est_time: st.estimated_minutes || st.est_time || 0,
             team_name: team || '',
             is_completed: matchedLog ? matchedLog.is_completed : false,
             status: matchedLog ? (matchedLog.status || 'NEW') : 'NEW',
             completed_by: matchedLog ? matchedLog.completed_by : null,
-            actual_minutes: matchedLog ? (matchedLog.actual_minutes || 0) : 0
+            actual_time: matchedLog ? (matchedLog.actual_time !== undefined ? matchedLog.actual_time : matchedLog.actual_minutes || 0) : 0
           };
         });
 
@@ -862,8 +862,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               task_id: taskToEdit.id,
               content: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes,
-              actual_minutes: 0,
+              est_time: st.estimated_minutes || st.est_time || 0,
               status: 'PENDING',
               team_name: team || ''
             });
@@ -872,8 +871,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               task_id: taskToEdit.id,
               content: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes,
-              actual_minutes: 0,
+              est_time: st.estimated_minutes || st.est_time || 0,
               status: 'PENDING',
               team_name: team || ''
             });
@@ -941,8 +939,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           task_id: taskId,
           content: st.content,
           assignee: st.assignee,
-          estimated_minutes: st.estimated_minutes,
-          actual_minutes: 0,
+          est_time: st.estimated_minutes || st.est_time || 0,
           status: 'PENDING',
           team_name: team || ''
         }));
@@ -959,6 +956,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         await logger.log('CREATE_TASK_TEMPLATE', `Created task template${idSuffix}: ${taskName.trim()}`, { taskId, payload });
       }
 
+      await useAppStore.getState().fetchTasks(true);
       toast.success(isEditMode ? 'Cập nhật bản mẫu thành công!' : 'Tạo bản mẫu thành công!');
       onSuccess();
       onClose();

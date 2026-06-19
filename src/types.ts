@@ -348,20 +348,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         const tagName = task.tag_name || '';
         const teamName = task.team_name || firstTeamName;
 
-        const parsedDesc = parseTaskDescriptionLocal(task.description);
+        const noteText = task.note || '';
+        const taskHistory = task.history || [];
+
         const sub_tasks = (task.subtasks || []).map((st: any) => ({
           id: st.id,
           content: st.content,
           assignee: st.assignee,
-          estimated_minutes: st.estimated_minutes
+          estimated_minutes: st.est_time || st.estimated_minutes || 0,
+          est_time: st.est_time || st.estimated_minutes || 0
         }));
         const meta = {
           project_name: projName,
           team_name: teamName,
           tag_name: tagName,
-          note: parsedDesc.note,
+          note: noteText,
           sub_tasks,
-          versions: parsedDesc.versions || []
+          versions: taskHistory
         };
         const completions: Record<string, any> = {};
 
@@ -385,7 +388,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
 
           // Map active subtasks completion details for this date
-          const sub_tasks = (task.subtasks || []).map((st: any) => {
+          const sub_tasks_mapped = (task.subtasks || []).map((st: any) => {
             const stLog = (task.subtask_logs || []).find(
               (sl: any) => sl.subtask_id === st.id && sl.todo_date === todoDate
             );
@@ -398,21 +401,26 @@ export const useAppStore = create<AppState>((set, get) => ({
                 sub_status = 'Skipped';
               }
             }
+            const matchedEst = stLog ? (stLog.est_time !== undefined ? stLog.est_time : stLog.estimated_minutes) : undefined;
+            const matchedAct = stLog ? (stLog.actual_time !== undefined ? stLog.actual_time : stLog.actual_minutes) : undefined;
+
             return {
               id: st.id,
               content: st.content,
               name: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes,
-              actual_minutes: stLog ? (stLog.actual_minutes || 0) : 0,
+              estimated_minutes: st.est_time || st.estimated_minutes || 0,
+              est_time: st.est_time || st.estimated_minutes || 0,
+              actual_minutes: matchedAct || 0,
+              actual_time: matchedAct || 0,
               sub_status
             };
           });
 
           // Fallback logic for todo_status if no task log exists but subtasks have logs
-          if (!tLog && sub_tasks.length > 0) {
-            const allDone = sub_tasks.every((s: any) => s.sub_status === 'Done');
-            const allSkipped = sub_tasks.every((s: any) => s.sub_status === 'Skipped');
+          if (!tLog && sub_tasks_mapped.length > 0) {
+            const allDone = sub_tasks_mapped.every((s: any) => s.sub_status === 'Done');
+            const allSkipped = sub_tasks_mapped.every((s: any) => s.sub_status === 'Skipped');
             if (allDone) {
               todo_status = 'DONE';
             } else if (allSkipped) {
@@ -420,12 +428,14 @@ export const useAppStore = create<AppState>((set, get) => ({
             }
           }
 
-          const actual_time = tLog ? (tLog.actual_minutes || 0) : sub_tasks.reduce((sum: number, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_minutes || 0) : 0), 0);
+          const actual_time = tLog 
+            ? (tLog.actual_time !== undefined ? tLog.actual_time : tLog.actual_minutes || 0) 
+            : sub_tasks_mapped.reduce((sum: number, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_time || 0) : 0), 0);
 
           completions[todoDate] = {
             todo_status,
             actual_time,
-            sub_tasks
+            sub_tasks: sub_tasks_mapped
           };
         });
 
@@ -526,13 +536,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         const tagName = task.tag_name || '';
         const teamName = task.team_name || firstTeamName;
 
-        const parsedDesc = parseTaskDescriptionLocal(task.description);
+        const noteText = task.note || '';
+        const taskHistory = task.history || [];
         const meta = {
           project_name: projName,
           team_name: teamName,
           tag_name: tagName,
-          note: parsedDesc.note,
-          versions: parsedDesc.versions || []
+          note: noteText,
+          versions: taskHistory
         };
 
         const taskLogs = taskLogsData.filter((log: any) => log.task_id === task.id);
@@ -540,10 +551,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         
         const subtasksWithLogs = (task.subtasks || []).map((subtask: any) => {
           const matchedSubtaskLogs = subtaskLogsData.filter((log: any) => log.subtask_id === subtask.id);
+          const mappedLogs = matchedSubtaskLogs.map((log: any) => ({
+            ...log,
+            estimated_minutes: log.est_time !== undefined ? log.est_time : log.estimated_minutes,
+            actual_minutes: log.actual_time !== undefined ? log.actual_time : log.actual_minutes
+          }));
           return {
             ...subtask,
+            estimated_minutes: subtask.est_time !== undefined ? subtask.est_time : subtask.estimated_minutes,
+            est_time: subtask.est_time !== undefined ? subtask.est_time : subtask.estimated_minutes,
             name: subtask.name || subtask.content, // Backward compatibility with UI name property
-            subtask_logs: matchedSubtaskLogs
+            subtask_logs: mappedLogs
           };
         });
 

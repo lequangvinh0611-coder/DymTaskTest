@@ -3,6 +3,7 @@ import { X, Trash2, Clock, Loader2, Plus, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/authStore';
+import { useAppStore } from '../types';
 import { logger } from '../lib/logger';
 import { SearchableFilterSelect } from './ui/SearchableFilterSelect';
 import { DateRangePicker } from './ui/DateRangePicker';
@@ -796,6 +797,48 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         versions: oldMeta?.versions || []
       };
 
+      let unifiedHistory: any[] = [];
+      const todayDateStr = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      const yesterdayDate = new Date();
+      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+      const yesterdayDateStr = new Date(yesterdayDate.getTime() - yesterdayDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+      if (originalTaskId && taskToClone) {
+        // Collect current history of original task
+        const originalHistory = Array.isArray((taskToClone as any).history) 
+          ? (taskToClone as any).history 
+          : (taskToClone.description ? (parseTaskDescription(taskToClone.description)?.versions || []) : []);
+          
+        // Build revision snapshot of current active state
+        const origMeta = parseTaskDescription(taskToClone.description);
+        const current_valid_from = origMeta?.last_updated_at
+          ? origMeta.last_updated_at.split('T')[0]
+          : (taskToClone.created_at ? taskToClone.created_at.split('T')[0] : todayDateStr);
+
+        const oldVersionSnapshot = {
+          valid_from: current_valid_from,
+          valid_until: yesterdayDateStr,
+          title: taskToClone.title || taskToClone.task_name || '',
+          description: origMeta?.note || origMeta?.description || '',
+          project_name: taskToClone.project_name || origMeta?.project_name || '',
+          team_name: taskToClone.team_name || origMeta?.team_name || '',
+          tag_name: taskToClone.tag_name || origMeta?.tag_name || '',
+          deadline_time: taskToClone.deadline_time || origMeta?.deadline_time || '',
+          deadline_days: Array.isArray(taskToClone.deadline_days) 
+            ? taskToClone.deadline_days.join(', ') 
+            : String(taskToClone.deadline_days || origMeta?.deadline_days || ''),
+          est_time: Number(taskToClone.est_time || taskToClone.estimated_minutes || 0),
+          sub_tasks: (taskToClone.subtasks || origMeta?.sub_tasks || []).map((sub: any) => ({
+            id: sub.id,
+            content: sub.content || sub.name || '',
+            assignee: sub.assignee || '',
+            estimated_minutes: sub.est_time !== undefined ? sub.est_time : (sub.estimated_minutes || 0)
+          }))
+        };
+
+        unifiedHistory = [...originalHistory, oldVersionSnapshot];
+      }
+
       const payload = {
         title: taskName.trim(),
         description: metadata,
@@ -803,7 +846,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         est_time: totalEstMinutes,
         status: 'PENDING', // Reset status as PENDING on create or edit/re-approve
         actual_time: 0,
-        user_id: profile?.id || null
+        user_id: profile?.id || null,
+        history: isEditMode && taskToEdit ? (taskToEdit as any).history || [] : unifiedHistory
       };
 
       if (isEditMode && taskToEdit) {
@@ -833,6 +877,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         }
       }
 
+      await useAppStore.getState().fetchApproveTasks(true);
       onSuccess();
       onClose();
     } catch (err: any) {

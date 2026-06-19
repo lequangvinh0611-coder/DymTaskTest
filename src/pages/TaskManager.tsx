@@ -1647,10 +1647,11 @@ const TaskManager: React.FC = () => {
           setApproveTaskToClone(null);
           setApproveOriginalTaskId(null);
         }}
-        onSuccess={() => {
+        onSuccess={async () => {
           setIsApproveModalOpen(false);
           setApproveTaskToClone(null);
           setApproveOriginalTaskId(null);
+          await useAppStore.getState().fetchApproveTasks(true);
           // Auto-navigate to approval workflow screen upon success
           setActiveTab('APPROVE TASK');
         }}
