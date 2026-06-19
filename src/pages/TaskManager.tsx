@@ -79,9 +79,35 @@ const getDisplayId = (idOrTask: string | { id: string; display_id?: number | nul
   return String(positiveHash).padStart(6, '0');
 };
 
-const formatDisplayDate = (str?: string): string => {
+const formatDisplayDate = (str?: any): string => {
   if (!str) return '';
-  const trimmed = str.trim();
+  if (Array.isArray(str)) {
+    if (str.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => str.includes(d))) {
+      return 'Mon - Fri';
+    }
+    return str.map(s => String(s).trim()).join(', ');
+  }
+  let trimmed = String(str).trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr)) {
+        if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
+          return 'Mon - Fri';
+        }
+        return arr.map(s => String(s).trim()).join(', ');
+      }
+    } catch (e) {
+      // safe fallback
+    }
+  }
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    const arr = trimmed.slice(1, -1).split(',').map(s => s.replace(/"/g, '').trim()).filter(Boolean);
+    if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
+      return 'Mon - Fri';
+    }
+    return arr.join(', ');
+  }
   if (trimmed.includes('~')) {
     return trimmed.split('~').map(s => formatDisplayDate(s.trim())).join(' ~ ');
   }

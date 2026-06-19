@@ -51,9 +51,35 @@ interface DbApproveTask {
   display_id?: number | null;
 }
 
-const formatDisplayDate = (str?: string): string => {
+const formatDisplayDate = (str?: any): string => {
   if (!str) return '';
-  const trimmed = str.trim();
+  if (Array.isArray(str)) {
+    if (str.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => str.includes(d))) {
+      return 'Mon - Fri';
+    }
+    return str.map(s => String(s).trim()).join(', ');
+  }
+  let trimmed = String(str).trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr)) {
+        if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
+          return 'Mon - Fri';
+        }
+        return arr.map(s => String(s).trim()).join(', ');
+      }
+    } catch (e) {
+      // safe fallback
+    }
+  }
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    const arr = trimmed.slice(1, -1).split(',').map(s => s.replace(/"/g, '').trim()).filter(Boolean);
+    if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
+      return 'Mon - Fri';
+    }
+    return arr.join(', ');
+  }
   if (trimmed.includes('~')) {
     return trimmed.split('~').map(s => formatDisplayDate(s.trim())).join(' ~ ');
   }
@@ -740,15 +766,11 @@ const ApproveTask: React.FC = () => {
             .from('tasks')
             .update({
               title: request.title,
-              task_name: request.title,
               description: descriptionValue,
               task_type: request.task_type,
-              type: request.task_type,
               est_time: final_est_time,
-              estimated_minutes: final_est_time,
               project_name: request.meta.project_name || '',
               tag_name: request.meta.tag_name || '',
-              team_name: request.meta.team_name || '',
               deadline_time: finalDeadlineTime,
               deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays]
             })
@@ -843,19 +865,14 @@ const ApproveTask: React.FC = () => {
           .from('tasks')
           .insert([{
             title: request.title,
-            task_name: request.title,
             description: request.meta.note || '',
             task_type: request.task_type,
-            type: request.task_type,
             status: 'ON',
             is_active: true,
             est_time: final_est_time,
-            estimated_minutes: final_est_time,
             actual_time: 0,
-            actual_minutes: 0,
             project_name: request.meta.project_name || '',
             tag_name: request.meta.tag_name || '',
-            team_name: request.meta.team_name || '',
             deadline_time: finalDeadlineTime,
             deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays]
           }])
