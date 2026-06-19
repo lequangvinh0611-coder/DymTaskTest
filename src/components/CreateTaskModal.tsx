@@ -608,22 +608,25 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           ? oldMeta.last_updated_at.split('T')[0]
           : (taskToEdit.created_at ? taskToEdit.created_at.split('T')[0] : todayStr);
 
-        if (current_valid_from <= yesterdayStr) {
-          const oldVersion: TaskVersion = {
-            valid_from: current_valid_from,
-            valid_until: yesterdayStr,
-            title: taskToEdit.title,
-            description: oldMeta.note || '',
-            project_name: oldMeta.project_name,
-            team_name: oldMeta.team_name,
-            tag_name: oldMeta.tag_name,
-            deadline_time: oldMeta.deadline_time || taskToEdit.deadline_time,
-            deadline_days: oldMeta.deadline_days || taskToEdit.deadline_days,
-            est_time: taskToEdit.est_time || taskToEdit.estimated_minutes,
-            sub_tasks: taskToEdit.subtasks || []
-          };
-          updatedVersions = [...updatedVersions, oldVersion];
-        }
+        const oldVersion: TaskVersion = {
+          valid_from: current_valid_from,
+          valid_until: todayStr,
+          title: taskToEdit.title || (taskToEdit as any).task_name || '',
+          description: oldMeta.note || '',
+          project_name: oldMeta.project_name || taskToEdit.project_name || '',
+          team_name: oldMeta.team_name || '',
+          tag_name: oldMeta.tag_name || taskToEdit.tag_name || '',
+          deadline_time: oldMeta.deadline_time || taskToEdit.deadline_time,
+          deadline_days: oldMeta.deadline_days || taskToEdit.deadline_days,
+          est_time: taskToEdit.est_time || taskToEdit.estimated_minutes || 0,
+          sub_tasks: (taskToEdit.subtasks || []).map((st: any) => ({
+            id: st.id,
+            content: st.content,
+            assignee: st.assignee,
+            estimated_minutes: st.estimated_minutes || st.est_time || 0
+          }))
+        };
+        updatedVersions = [...updatedVersions, oldVersion];
       }
 
       const reconcileSubtasksState = (existingSubs: any[] | undefined, templateSubs: SubTask[]): any[] => {
@@ -701,18 +704,15 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         : true;
 
       // Serialization description holding clean note AND versions if we have historical versions
-      let descriptionValue = note.trim();
-      if (updatedVersions && updatedVersions.length > 0) {
-        descriptionValue = JSON.stringify({
-          project_name: project,
-          team_name: team,
-          tag_name: tag,
-          note: note.trim(),
-          versions: updatedVersions,
-          last_updated_at: new Date().toISOString(),
-          last_updated_by: updaterName
-        });
-      }
+      const descriptionValue = JSON.stringify({
+        project_name: project,
+        team_name: team,
+        tag_name: tag,
+        note: note.trim(),
+        versions: updatedVersions,
+        last_updated_at: new Date().toISOString(),
+        last_updated_by: updaterName
+      });
 
       // Construct compliant RDBMS payload with matching properties for schema compatibility
       const payload = {

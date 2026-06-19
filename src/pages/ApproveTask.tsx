@@ -754,18 +754,15 @@ const ApproveTask: React.FC = () => {
           };
           updatedVersions = [...updatedVersions, oldVersion];
 
-          let descriptionValue = (request.meta.note || '').trim();
-          if (updatedVersions && updatedVersions.length > 0) {
-            descriptionValue = JSON.stringify({
-              project_name: request.meta.project_name || '',
-              team_name: request.meta.team_name || '',
-              tag_name: request.meta.tag_name || '',
-              note: (request.meta.note || '').trim(),
-              versions: updatedVersions,
-              last_updated_at: new Date().toISOString(),
-              last_updated_by: updaterName
-            });
-          }
+          const descriptionValue = JSON.stringify({
+            project_name: request.meta.project_name || '',
+            team_name: request.meta.team_name || '',
+            tag_name: request.meta.tag_name || '',
+            note: (request.meta.note || '').trim(),
+            versions: updatedVersions,
+            last_updated_at: new Date().toISOString(),
+            last_updated_by: updaterName
+          });
 
           // Update tasks
           const { error: updateError } = await supabase
@@ -1087,7 +1084,7 @@ const ApproveTask: React.FC = () => {
       if (meta.original_task_id) {
         supabase
           .from('tasks')
-          .select('*')
+          .select('*, subtasks(*)')
           .eq('id', meta.original_task_id)
           .single()
           .then(({ data, error }) => {
@@ -1352,9 +1349,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         valid_until: 'Present (Current Active)',
         title: originalTask.task_name || originalTask.title || '',
         description: originalTask.meta?.note || originalTask.description || '',
-        project_name: originalTask.project_name || '',
-        team_name: originalTask.team_name || '',
-        tag_name: originalTask.tag_name || '',
+        project_name: originalTask.meta?.project_name || originalTask.project_name || '',
+        team_name: originalTask.meta?.team_name || originalTask.team_name || '',
+        tag_name: originalTask.meta?.tag_name || originalTask.tag_name || '',
         deadline_time: originalTask.deadline_time || '',
         deadline_days: Array.isArray(originalTask.deadline_days)
           ? originalTask.deadline_days.join(', ')
@@ -1363,7 +1360,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         sub_tasks: (originalTask.subtasks || []).map((st: any) => ({
           content: st.content,
           assignee: st.assignee,
-          estimated_minutes: st.est_time !== undefined ? st.est_time : (st.estimated_minutes || 0)
+          estimated_minutes: st.estimated_minutes !== undefined ? st.estimated_minutes : (st.est_time !== undefined ? st.est_time : 0)
         }))
       };
       // Prepend current active live version to timeline
