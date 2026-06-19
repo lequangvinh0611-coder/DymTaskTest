@@ -772,6 +772,7 @@ const ApproveTask: React.FC = () => {
               note: (request.meta.note || '').trim(),
               task_type: request.task_type,
               est_time: final_est_time,
+              estimated_minutes: final_est_time,
               project_name: request.meta.project_name || '',
               tag_name: request.meta.tag_name || '',
               deadline_time: finalDeadlineTime,
@@ -810,6 +811,7 @@ const ApproveTask: React.FC = () => {
                 content: st.content,
                 assignee: st.assignee,
                 est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
+                estimated_minutes: Number(st.estimated_minutes) || Number(st.est_time) || 0,
                 team_name: request.meta.team_name || ''
               });
               seenDbIds.add(matchedDbSub.id);
@@ -819,6 +821,7 @@ const ApproveTask: React.FC = () => {
                 content: st.content,
                 assignee: st.assignee,
                 est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
+                estimated_minutes: Number(st.estimated_minutes) || Number(st.est_time) || 0,
                 status: 'PENDING',
                 team_name: request.meta.team_name || ''
               });
@@ -873,6 +876,7 @@ const ApproveTask: React.FC = () => {
             status: 'ON',
             is_active: true,
             est_time: final_est_time,
+            estimated_minutes: final_est_time,
             project_name: request.meta.project_name || '',
             tag_name: request.meta.tag_name || '',
             deadline_time: finalDeadlineTime,
@@ -893,6 +897,7 @@ const ApproveTask: React.FC = () => {
           content: st.content,
           assignee: st.assignee,
           est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
+          estimated_minutes: Number(st.estimated_minutes) || Number(st.est_time) || 0,
           status: 'PENDING',
           team_name: request.meta.team_name || ''
         }));
@@ -1363,8 +1368,18 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
           estimated_minutes: st.estimated_minutes !== undefined ? st.estimated_minutes : (st.est_time !== undefined ? st.est_time : 0)
         }))
       };
-      // Prepend current active live version to timeline
-      list = [liveVer, ...list];
+      // Prevent duplicating current live version if it is already snapshotted as the latest entry in original history versions
+      const isAlreadyRepresented = list.some(item => 
+        (item.title === liveVer.title) && 
+        (item.project_name === liveVer.project_name) &&
+        (item.team_name === liveVer.team_name) &&
+        (item.tag_name === liveVer.tag_name) &&
+        (item.deadline_time === liveVer.deadline_time) &&
+        (Number(item.est_time) === Number(liveVer.est_time))
+      );
+      if (!isAlreadyRepresented) {
+        list = [liveVer, ...list];
+      }
     }
     return list;
   }, [originalTask, drawerParsedMeta, openedDrawerTask]);

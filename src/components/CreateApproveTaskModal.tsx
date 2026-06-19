@@ -297,14 +297,15 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         setTaskType(taskToEdit.task_type || '');
         setNote(meta.note || '');
 
-        const currentDeadlineTime = meta.deadline_time || '';
+        const currentDeadlineTime = meta.deadline_time || (taskToEdit as any).deadline_time || '';
         if (currentDeadlineTime) {
           setDeadlineTime24h(convertTo24h(currentDeadlineTime));
         } else {
           setDeadlineTime24h('');
         }
 
-        const daysStr = meta.deadline_days || '';
+        const daysInput = meta.deadline_days || (taskToEdit as any).deadline_days || '';
+        const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : String(daysInput || '');
         if (taskToEdit.task_type === 'DAILY') {
           // Default
         } else if (taskToEdit.task_type === 'WEEKLY') {
@@ -327,28 +328,29 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           } else {
             setOnetimeStartDate(daysStr);
             setOnetimeEndDate(daysStr);
-            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || '17:00') }]);
+            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || (taskToEdit as any).deadline_time || '17:00') }]);
           }
         }
 
         setSubTasks(taskToEdit.sub_tasks || meta.sub_tasks || []);
       } else if (taskToClone) {
         const meta = parseTaskDescription(taskToClone.description);
-        setTaskName(taskToClone.title || '');
-        setProject(meta.project_name || '');
-        setTag(meta.tag_name || '');
-        setTeam(meta.team_name || '');
+        setTaskName(taskToClone.title || taskToClone.task_name || '');
+        setProject(meta.project_name || taskToClone.project_name || '');
+        setTag(meta.tag_name || taskToClone.tag_name || '');
+        setTeam(meta.team_name || taskToClone.team_name || '');
         setTaskType(taskToClone.task_type || '');
         setNote(meta.note || '');
 
-        const currentDeadlineTime = meta.deadline_time || '';
+        const currentDeadlineTime = meta.deadline_time || (taskToClone as any).deadline_time || '';
         if (currentDeadlineTime) {
           setDeadlineTime24h(convertTo24h(currentDeadlineTime));
         } else {
           setDeadlineTime24h('');
         }
 
-        const daysStr = meta.deadline_days || '';
+        const daysInput = meta.deadline_days || (taskToClone as any).deadline_days || '';
+        const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : String(daysInput || '');
         if (taskToClone.task_type === 'DAILY') {
           // Default
         } else if (taskToClone.task_type === 'WEEKLY') {
@@ -371,13 +373,14 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           } else {
             setOnetimeStartDate(daysStr);
             setOnetimeEndDate(daysStr);
-            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || '17:00') }]);
+            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || (taskToClone as any).deadline_time || '17:00') }]);
           }
         }
 
-        const clonedSubtasks = (taskToClone.sub_tasks || meta.sub_tasks || []).map((sb: any) => ({
+        const clonedSubtasks = (taskToClone.sub_tasks || meta.sub_tasks || taskToClone.subtasks || []).map((sb: any) => ({
           ...sb,
-          id: originalTaskId ? sb.id : Math.random().toString(36).substring(2, 9)
+          id: originalTaskId ? sb.id : Math.random().toString(36).substring(2, 9),
+          estimated_minutes: sb.estimated_minutes || sb.est_time || 0
         }));
         setSubTasks(clonedSubtasks);
       } else {
