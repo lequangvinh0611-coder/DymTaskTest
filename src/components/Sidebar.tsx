@@ -28,8 +28,8 @@ const parseTaskDescription = (rawDescription: any) => {
 
   if (typeof rawDescription === 'object') {
     return {
-      team_name: rawDescription.team_name || '',
-      sub_tasks: Array.isArray(rawDescription.sub_tasks) ? rawDescription.sub_tasks : []
+      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
+      sub_tasks: Array.isArray(rawDescription.sub_tasks || rawDescription.subtasks) ? (rawDescription.sub_tasks || rawDescription.subtasks) : []
     };
   }
 

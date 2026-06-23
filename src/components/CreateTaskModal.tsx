@@ -165,7 +165,7 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   if (typeof rawDescription === 'object') {
     return {
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || '',
+      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
       tag_name: rawDescription.tag_name || '',
       note: rawDescription.note || rawDescription.description || ''
     };

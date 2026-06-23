@@ -130,21 +130,31 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   if (!rawDescription) return defaultMeta;
 
   if (typeof rawDescription === 'object') {
+    const isDbTask = 'deadline_days' in rawDescription || 'deadline_time' in rawDescription || 'note' in rawDescription;
+    const sub_tasks = Array.isArray(rawDescription.sub_tasks || rawDescription.subtasks)
+      ? (rawDescription.sub_tasks || rawDescription.subtasks).map((st: any) => ({
+          id: st.id,
+          content: st.content || st.name || '',
+          assignee: st.assignee || '',
+          est_time: st.est_time || st.estimated_minutes || 0
+        }))
+      : [];
+
     return {
       description: rawDescription.description || '',
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || '',
+      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
       tag_name: rawDescription.tag_name || '',
       deadline_time: rawDescription.deadline_time || '17:00',
       deadline_days: rawDescription.deadline_days || 'Mon - Fri',
-      sub_tasks: Array.isArray(rawDescription.sub_tasks) ? rawDescription.sub_tasks : [],
-      note: rawDescription.note || '',
+      sub_tasks,
+      note: rawDescription.note || rawDescription.description || '',
       last_updated_by: rawDescription.last_updated_by || '',
       last_updated_at: rawDescription.last_updated_at || '',
-      original_task_id: rawDescription.original_task_id || null,
+      original_task_id: rawDescription.original_task_id || (isDbTask ? rawDescription.id : null),
       onetime_targets: Array.isArray(rawDescription.onetime_targets) ? rawDescription.onetime_targets : [],
       completions: rawDescription.completions || {},
-      versions: rawDescription.versions || []
+      versions: rawDescription.versions || rawDescription.history || []
     };
   }
 
@@ -651,7 +661,7 @@ const ApproveTask: React.FC = () => {
           toast.success(`Request accepted! Changes applied only for today's instance of task "${request.title}".`);
         } else {
           // --- FUTURE: Standard Template and Subtasks Delta sync ---
-          const latestMeta = parseTaskDescription(originalTask.description);
+          const latestMeta = parseTaskDescription(originalTask);
           
           // Fetch actual live subtasks of the original task template to preserve in oldVersion history
           const { data: originalSubs } = await supabase

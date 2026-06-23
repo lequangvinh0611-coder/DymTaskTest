@@ -26,11 +26,20 @@ interface SubTask {
 
 // Definition of metadata stored as robust JSON inside standard 'description' column
 interface TaskMetadata {
+  description?: string;
   project_name: string;
   team_name: string;
   tag_name: string;
+  deadline_time: string;
+  deadline_days: string;
+  sub_tasks?: any[];
   note: string;
+  completions?: any;
   versions?: any[];
+  onetime_targets?: any[];
+  last_updated_by?: string;
+  last_updated_at?: string;
+  original_task_id?: string | null;
 }
 
 // Database schema representation
@@ -134,25 +143,51 @@ const formatDateTime = (isoString?: string): string => {
   return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
 };
 
-// Helper to parse complex data out of standard 'description' column
+// Helper to parse complex data out of standard 'description' column or directly from flat DbTask properties
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
+    description: '',
     project_name: '',
     team_name: '',
     tag_name: '',
+    deadline_time: '',
+    deadline_days: '',
+    sub_tasks: [],
     note: '',
-    versions: []
+    completions: {},
+    versions: [],
+    onetime_targets: []
   };
 
   if (!rawDescription) return defaultMeta;
 
   if (typeof rawDescription === 'object') {
+    // Detect if this is a DbTask or flat object with direct columns
+    const isDbTask = 'deadline_days' in rawDescription || 'deadline_time' in rawDescription || 'note' in rawDescription;
+    const sub_tasks = Array.isArray(rawDescription.sub_tasks || rawDescription.subtasks)
+      ? (rawDescription.sub_tasks || rawDescription.subtasks).map((st: any) => ({
+          id: st.id,
+          content: st.content || st.name || '',
+          assignee: st.assignee || '',
+          est_time: st.est_time || st.estimated_minutes || 0
+        }))
+      : [];
+
     return {
+      description: rawDescription.description || '',
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || '',
+      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
       tag_name: rawDescription.tag_name || '',
+      deadline_time: rawDescription.deadline_time || '',
+      deadline_days: rawDescription.deadline_days || '',
+      sub_tasks,
       note: rawDescription.note || rawDescription.description || '',
-      versions: rawDescription.versions || []
+      completions: rawDescription.completions || {},
+      versions: rawDescription.versions || rawDescription.history || [],
+      onetime_targets: rawDescription.onetime_targets || [],
+      last_updated_by: rawDescription.last_updated_by || '',
+      last_updated_at: rawDescription.last_updated_at || '',
+      original_task_id: rawDescription.original_task_id || (isDbTask ? rawDescription.id : null)
     };
   }
 
@@ -162,11 +197,20 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
       try {
         const parsed = JSON.parse(trimmed);
         return {
+          description: parsed.description || '',
           project_name: parsed.project_name || '',
           team_name: parsed.team_name || '',
           tag_name: parsed.tag_name || '',
+          deadline_time: parsed.deadline_time || '',
+          deadline_days: parsed.deadline_days || '',
+          sub_tasks: Array.isArray(parsed.sub_tasks) ? parsed.sub_tasks : [],
           note: parsed.note || parsed.description || '',
-          versions: parsed.versions || []
+          completions: parsed.completions || {},
+          versions: parsed.versions || parsed.history || [],
+          onetime_targets: parsed.onetime_targets || [],
+          last_updated_by: parsed.last_updated_by || '',
+          last_updated_at: parsed.last_updated_at || '',
+          original_task_id: parsed.original_task_id || null
         };
       } catch {
         // Fallback
@@ -646,7 +690,7 @@ const TaskManager: React.FC = () => {
   const [quickApprovingId, setQuickApprovingId] = useState<string | null>(null);
 
   const handleQuickApprove = (task: DbTask) => {
-    const meta = parseTaskDescription(task.description) as any;
+    const meta = parseTaskDescription(task) as any;
     const mappedSubtasks = ((task as any).subtasks || []).map((st: any) => ({
       id: st.id,
       content: st.content,
@@ -679,7 +723,7 @@ const TaskManager: React.FC = () => {
   };
 
   const handleOpenApproveEditModal = (task: DbTask) => {
-    const meta = parseTaskDescription(task.description) as any;
+    const meta = parseTaskDescription(task) as any;
     const mappedSubtasks = ((task as any).subtasks || []).map((st: any) => ({
       id: st.id,
       content: st.content,
