@@ -122,6 +122,49 @@ const formatDisplayDate = (str?: any): string => {
   return trimmed;
 };
 
+const isSameVersion = (v1: any, v2: any): boolean => {
+  if (!v1 || !v2) return false;
+  const cleanStr = (s: any) => String(s || '').trim();
+  const normalizeTime = (t: any) => {
+    let s = cleanStr(t);
+    if (!s) return '';
+    if (s.includes(':')) {
+      const parts = s.split(':');
+      if (parts.length >= 2) {
+        return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+      }
+    }
+    return s;
+  };
+
+  const titleSame = cleanStr(v1.title || v1.task_name) === cleanStr(v2.title || v2.task_name);
+  const projectSame = cleanStr(v1.project_name) === cleanStr(v2.project_name);
+  const teamSame = cleanStr(v1.team_name) === cleanStr(v2.team_name);
+  const tagSame = cleanStr(v1.tag_name) === cleanStr(v2.tag_name);
+  const deadlineTimeSame = normalizeTime(v1.deadline_time) === normalizeTime(v2.deadline_time);
+  
+  const normDays = (d: any) => {
+    if (Array.isArray(d)) return d.map(cleanStr).sort().join(', ');
+    return cleanStr(d).split(',').map(cleanStr).sort().join(', ');
+  };
+  const deadlineDaysSame = normDays(v1.deadline_days) === normDays(v2.deadline_days);
+  
+  const estSame = Number(v1.est_time || v1.estimated_minutes || 0) === Number(v2.est_time || v2.estimated_minutes || 0);
+  const noteSame = cleanStr(v1.description || v1.note || v1.desc) === cleanStr(v2.description || v2.note || v2.desc);
+
+  const sub1 = Array.isArray(v1.sub_tasks) ? v1.sub_tasks : (Array.isArray(v1.subtasks) ? v1.subtasks : []);
+  const sub2 = Array.isArray(v2.sub_tasks) ? v2.sub_tasks : (Array.isArray(v2.subtasks) ? v2.subtasks : []);
+  
+  let subsSame = sub1.length === sub2.length;
+  if (subsSame) {
+    const sortedSub1 = [...sub1].map((s: any) => cleanStr(s.content)).sort();
+    const sortedSub2 = [...sub2].map((s: any) => cleanStr(s.content)).sort();
+    subsSame = sortedSub1.every((val, i) => val === sortedSub2[i]);
+  }
+
+  return titleSame && projectSame && teamSame && tagSame && deadlineTimeSame && deadlineDaysSame && estSame && noteSame && subsSame;
+};
+
 const formatDateTime = (isoString?: string): string => {
   if (!isoString) return '';
   const d = new Date(isoString);
@@ -796,8 +839,54 @@ const TaskManager: React.FC = () => {
   }, [openedDrawerTask]);
 
   const historyVersions = useMemo(() => {
-    return drawerParsedMeta?.versions || [];
-  }, [drawerParsedMeta]);
+    let list: any[] = [];
+    if (drawerParsedMeta?.versions && drawerParsedMeta.versions.length > 0) {
+      list = [...drawerParsedMeta.versions];
+    }
+
+    if (openedDrawerTask) {
+      const liveVer = {
+        valid_from: openedDrawerTask.created_at ? openedDrawerTask.created_at.split('T')[0] : 'N/A',
+        valid_until: 'Present (Current Active)',
+        title: openedDrawerTask.task_name || openedDrawerTask.title || '',
+        description: drawerParsedMeta?.note || openedDrawerTask.note || '',
+        project_name: openedDrawerTask.project_name || drawerParsedMeta?.project_name || '',
+        team_name: openedDrawerTask.team_name || drawerParsedMeta?.team_name || '',
+        tag_name: openedDrawerTask.tag_name || drawerParsedMeta?.tag_name || '',
+        deadline_time: openedDrawerTask.deadline_time || '',
+        deadline_days: Array.isArray(openedDrawerTask.deadline_days)
+          ? openedDrawerTask.deadline_days.join(', ')
+          : String(openedDrawerTask.deadline_days || ''),
+        est_time: Number(openedDrawerTask.est_time || openedDrawerTask.estimated_minutes || 0),
+        sub_tasks: (openedDrawerTask.subtasks || []).map((st: any) => ({
+          content: st.content,
+          assignee: st.assignee,
+          est_time: st.est_time !== undefined && st.est_time !== null ? st.est_time : (st.estimated_minutes !== undefined ? st.estimated_minutes : 0)
+        }))
+      };
+
+      const isAlreadyRepresented = list.some(item => isSameVersion(item, liveVer));
+      if (!isAlreadyRepresented) {
+        list = [liveVer, ...list];
+      }
+    }
+
+    // Normalize date order for all history items (ensure valid_from <= valid_until chronologically)
+    return list.map(item => {
+      if (item.valid_from && item.valid_until && item.valid_until !== 'Present (Current Active)') {
+        const fromDate = new Date(item.valid_from);
+        const untilDate = new Date(item.valid_until);
+        if (!isNaN(fromDate.getTime()) && !isNaN(untilDate.getTime()) && fromDate > untilDate) {
+          return {
+            ...item,
+            valid_from: item.valid_until,
+            valid_until: item.valid_from
+          };
+        }
+      }
+      return item;
+    });
+  }, [drawerParsedMeta, openedDrawerTask]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-white overflow-x-auto relative font-sans">

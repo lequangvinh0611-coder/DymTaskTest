@@ -334,6 +334,22 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
   }, [onetimeStartDate, onetimeEndDate, deadlineTime24h, taskType]);
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
 
+  // State to track original values for change detection
+  const [originalValues, setOriginalValues] = useState<{
+    taskName: string;
+    project: string;
+    tag: string;
+    team: string;
+    taskType: string;
+    note: string;
+    deadlineTime24h: string;
+    selectedDays: string[];
+    monthlyDays: string;
+    onetimeStartDate: string;
+    onetimeEndDate: string;
+    subTasks: any[];
+  } | null>(null);
+
   useEffect(() => {
     if (isOpen) {
       const fetchMasterData = async () => {
@@ -384,6 +400,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
 
         const daysInput = meta.deadline_days || (taskToEdit as any).deadline_days || '';
         const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : String(daysInput || '');
+        let startDt = '';
+        let endDt = '';
         if (taskToEdit.task_type === 'DAILY') {
           // Default
         } else if (taskToEdit.task_type === 'WEEKLY') {
@@ -396,8 +414,10 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           const targets = meta.onetime_targets || [];
           if (targets.length > 0) {
             const sorted = [...targets].sort((a: any, b: any) => (a.date || '').localeCompare(b.date || ''));
-            setOnetimeStartDate(sorted[0]?.date || '');
-            setOnetimeEndDate(sorted[sorted.length - 1]?.date || '');
+            startDt = sorted[0]?.date || '';
+            endDt = sorted[sorted.length - 1]?.date || '';
+            setOnetimeStartDate(startDt);
+            setOnetimeEndDate(endDt);
             setOnetimeTargets(targets.map((tgt: any) => ({
               id: tgt.id || Math.random().toString(36).substring(2, 9),
               date: tgt.date || '',
@@ -405,6 +425,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
             })));
           } else {
             const { start, end, datesList } = parseOnetimeDates(daysInput);
+            startDt = start;
+            endDt = end;
             setOnetimeStartDate(start);
             setOnetimeEndDate(end);
             setOnetimeTargets(datesList.map((dt, idx) => ({
@@ -415,7 +437,23 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           }
         }
 
-        setSubTasks(taskToEdit.sub_tasks || meta.sub_tasks || []);
+        const initialSubtasks = taskToEdit.sub_tasks || meta.sub_tasks || [];
+        setSubTasks(initialSubtasks);
+
+        setOriginalValues({
+          taskName: taskToEdit.title || '',
+          project: meta.project_name || '',
+          tag: meta.tag_name || '',
+          team: meta.team_name || '',
+          taskType: taskToEdit.task_type || '',
+          note: meta.note || '',
+          deadlineTime24h: currentDeadlineTime ? convertTo24h(currentDeadlineTime) : '',
+          selectedDays: taskToEdit.task_type === 'WEEKLY' ? normalizeDaysOfWeek(daysInput) : [],
+          monthlyDays: taskToEdit.task_type === 'MONTHLY' ? daysStr : '',
+          onetimeStartDate: taskToEdit.task_type === 'ONETIME' ? startDt : '',
+          onetimeEndDate: taskToEdit.task_type === 'ONETIME' ? endDt : '',
+          subTasks: initialSubtasks
+        });
       } else if (taskToClone) {
         const meta = parseTaskDescription(taskToClone.description);
         setTaskName(taskToClone.title || taskToClone.task_name || '');
@@ -434,6 +472,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
 
         const daysInput = meta.deadline_days || (taskToClone as any).deadline_days || '';
         const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : String(daysInput || '');
+        let startDt = '';
+        let endDt = '';
         if (taskToClone.task_type === 'DAILY') {
           // Default
         } else if (taskToClone.task_type === 'WEEKLY') {
@@ -446,8 +486,10 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           const targets = meta.onetime_targets || [];
           if (targets.length > 0) {
             const sorted = [...targets].sort((a: any, b: any) => (a.date || '').localeCompare(b.date || ''));
-            setOnetimeStartDate(sorted[0]?.date || '');
-            setOnetimeEndDate(sorted[sorted.length - 1]?.date || '');
+            startDt = sorted[0]?.date || '';
+            endDt = sorted[sorted.length - 1]?.date || '';
+            setOnetimeStartDate(startDt);
+            setOnetimeEndDate(endDt);
             setOnetimeTargets(targets.map((tgt: any) => ({
               id: tgt.id || Math.random().toString(36).substring(2, 9),
               date: tgt.date || '',
@@ -455,6 +497,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
             })));
           } else {
             const { start, end, datesList } = parseOnetimeDates(daysInput);
+            startDt = start;
+            endDt = end;
             setOnetimeStartDate(start);
             setOnetimeEndDate(end);
             setOnetimeTargets(datesList.map((dt, idx) => ({
@@ -471,6 +515,21 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           est_time: sb.est_time || sb.estimated_minutes || 0
         }));
         setSubTasks(clonedSubtasks);
+
+        setOriginalValues({
+          taskName: taskToClone.title || taskToClone.task_name || '',
+          project: meta.project_name || taskToClone.project_name || '',
+          tag: meta.tag_name || taskToClone.tag_name || '',
+          team: meta.team_name || taskToClone.team_name || '',
+          taskType: taskToClone.task_type || '',
+          note: meta.note || '',
+          deadlineTime24h: currentDeadlineTime ? convertTo24h(currentDeadlineTime) : '',
+          selectedDays: taskToClone.task_type === 'WEEKLY' ? normalizeDaysOfWeek(daysInput) : [],
+          monthlyDays: taskToClone.task_type === 'MONTHLY' ? daysStr : '',
+          onetimeStartDate: taskToClone.task_type === 'ONETIME' ? startDt : '',
+          onetimeEndDate: taskToClone.task_type === 'ONETIME' ? endDt : '',
+          subTasks: clonedSubtasks
+        });
       } else {
         setTaskName('');
         setProject('');
@@ -492,6 +551,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           assignee: profile?.name || '',
           est_time: 60
         }]);
+        setOriginalValues(null);
       }
     }
   }, [isOpen, taskToEdit, taskToClone, profile]);
@@ -546,51 +606,41 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
   }, [masterData.assignees]);
 
   const isUnchanged = useMemo(() => {
-    const sourceTask = taskToEdit || taskToClone;
-    if (!sourceTask) return false;
+    if (!originalValues) return false;
 
-    const sourceMeta = parseTaskDescription(sourceTask.description);
-    
-    if (taskName.trim().toLowerCase() !== (sourceTask.title || '').trim().toLowerCase()) return false;
-    if (project !== (sourceMeta.project_name || '')) return false;
-    if (team !== (sourceMeta.team_name || '')) return false;
-    if (tag !== (sourceMeta.tag_name || '')) return false;
-    if (taskType !== (sourceTask.task_type || '')) return false;
-    if (note.trim().toLowerCase() !== (sourceMeta.note || '').trim().toLowerCase()) return false;
-    
-    const sourceTime24 = sourceMeta.deadline_time ? convertTo24h(sourceMeta.deadline_time) : '';
-    if (deadlineTime24h !== sourceTime24) return false;
-    
+    if ((taskName || '').trim().toLowerCase() !== (originalValues.taskName || '').trim().toLowerCase()) return false;
+    if (project !== originalValues.project) return false;
+    if (team !== originalValues.team) return false;
+    if (tag !== originalValues.tag) return false;
+    if (taskType !== originalValues.taskType) return false;
+    if ((note || '').trim().toLowerCase() !== (originalValues.note || '').trim().toLowerCase()) return false;
+    if (deadlineTime24h !== originalValues.deadlineTime24h) return false;
+
     if (taskType === 'WEEKLY') {
-      const sourceDaysStr = sourceMeta.deadline_days || '';
-      const sourceDays = sourceDaysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
-      const isWeeklyEqual = selectedDays.length === sourceDays.length && selectedDays.every((d, i) => d === sourceDays[i]);
+      const isWeeklyEqual = selectedDays.length === originalValues.selectedDays.length &&
+        selectedDays.every((d, i) => d === originalValues.selectedDays[i]);
       if (!isWeeklyEqual) return false;
     } else if (taskType === 'MONTHLY') {
-      if (monthlyDays.trim() !== (sourceMeta.deadline_days || '').trim()) return false;
+      if ((monthlyDays || '').trim() !== (originalValues.monthlyDays || '').trim()) return false;
     } else if (taskType === 'ONETIME') {
-      const sourceTargets = sourceMeta.onetime_targets || [];
-      const sortedSource = [...sourceTargets].sort((a: any, b: any) => (a.date || '').localeCompare(b.date || ''));
-      const sourceStart = sortedSource[0]?.date || sourceMeta.deadline_days || '';
-      const sourceEnd = sortedSource[sortedSource.length - 1]?.date || sourceMeta.deadline_days || '';
-      if (onetimeStartDate !== sourceStart || onetimeEndDate !== sourceEnd) return false;
+      if (onetimeStartDate !== originalValues.onetimeStartDate || onetimeEndDate !== originalValues.onetimeEndDate) return false;
     }
-    
-    const sourceSubtasks = sourceMeta.sub_tasks || [];
-    if (subTasks.length !== sourceSubtasks.length) return false;
+
+    if (subTasks.length !== originalValues.subTasks.length) return false;
     const isSubtasksEqual = subTasks.every((st, idx) => {
-      const orig = sourceSubtasks[idx];
+      const orig = originalValues.subTasks[idx];
       if (!orig) return false;
-      return st.content.trim().toLowerCase() === orig.content.trim().toLowerCase() &&
-             st.assignee === orig.assignee &&
-             Number(st.est_time || (st as any).estimated_minutes) === Number(orig.est_time || (orig as any).estimated_minutes);
+      const stEst = Number(st.est_time || (st as any).estimated_minutes || 0);
+      const origEst = Number(orig.est_time || orig.estimated_minutes || 0);
+      return (st.content || '').trim().toLowerCase() === (orig.content || '').trim().toLowerCase() &&
+             (st.assignee || '').trim() === (orig.assignee || '').trim() &&
+             stEst === origEst;
     });
     if (!isSubtasksEqual) return false;
 
     return true;
   }, [
-    taskToEdit,
-    taskToClone,
+    originalValues,
     taskName,
     project,
     team,
@@ -909,7 +959,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
 
         const oldVersionSnapshot = {
           valid_from: current_valid_from,
-          valid_until: yesterdayDateStr,
+          valid_until: todayDateStr,
           title: taskToClone.title || taskToClone.task_name || '',
           description: origMeta?.note || origMeta?.description || '',
           project_name: taskToClone.project_name || origMeta?.project_name || '',

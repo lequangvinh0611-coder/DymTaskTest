@@ -346,6 +346,22 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
   // State to track which subtask's dropdown select is currently active
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
 
+  // State to track original values for change detection
+  const [originalValues, setOriginalValues] = useState<{
+    taskName: string;
+    project: string;
+    tag: string;
+    team: string;
+    taskType: string;
+    note: string;
+    deadlineTime24h: string;
+    selectedDays: string[];
+    monthlyDays: string;
+    onetimeStartDate: string;
+    onetimeEndDate: string;
+    subTasks: any[];
+  } | null>(null);
+
   // Fetch Master Data on open Including IDs for Relations
   useEffect(() => {
     if (isOpen) {
@@ -434,6 +450,21 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
             }))
           : [];
         setSubTasks(initialSubTasks);
+
+        setOriginalValues({
+          taskName: taskToEdit.title || (taskToEdit as any).task_name || '',
+          project: projName,
+          tag: tagName,
+          team: teamName,
+          taskType: taskToEdit.task_type || (taskToEdit as any).type || '',
+          note: dbNote,
+          deadlineTime24h: currentDeadlineTime ? convertTo24h(currentDeadlineTime) : '',
+          selectedDays: taskToEdit.task_type === 'WEEKLY' ? normalizeDaysOfWeek(daysInput) : [],
+          monthlyDays: taskToEdit.task_type === 'MONTHLY' ? daysStr : '',
+          onetimeStartDate: taskToEdit.task_type === 'ONETIME' ? parseOnetimeDates(daysInput).start : '',
+          onetimeEndDate: taskToEdit.task_type === 'ONETIME' ? parseOnetimeDates(daysInput).end : '',
+          subTasks: initialSubTasks
+        });
       } else if (taskToClone) {
         const meta = parseTaskDescription(taskToClone.description);
         
@@ -488,6 +519,21 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
             }))
           : [];
         setSubTasks(initialClonedSubTasks);
+
+        setOriginalValues({
+          taskName: taskToClone.title || (taskToClone as any).task_name || '',
+          project: projName,
+          tag: tagName,
+          team: teamName,
+          taskType: taskToClone.task_type || (taskToClone as any).type || '',
+          note: dbNote,
+          deadlineTime24h: currentDeadlineTime ? convertTo24h(currentDeadlineTime) : '',
+          selectedDays: taskToClone.task_type === 'WEEKLY' ? normalizeDaysOfWeek(daysInput) : [],
+          monthlyDays: taskToClone.task_type === 'MONTHLY' ? daysStr : '',
+          onetimeStartDate: taskToClone.task_type === 'ONETIME' ? parseOnetimeDates(daysInput).start : '',
+          onetimeEndDate: taskToClone.task_type === 'ONETIME' ? parseOnetimeDates(daysInput).end : '',
+          subTasks: initialClonedSubTasks
+        });
       } else {
         // Reset inputs on Create New to empty / unselected as requested
         setTaskName('');
@@ -510,6 +556,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           assignee: profile?.name || '',
           est_time: 60
         }]);
+        setOriginalValues(null);
       }
     }
   }, [isOpen, taskToEdit, taskToClone, profile]);
@@ -572,56 +619,42 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
   }, [masterData.assignees]);
 
   const isUnchanged = useMemo(() => {
-    if (!taskToEdit) return false;
+    if (!isEditMode || !originalValues) return false;
 
-    const meta = parseTaskDescription(taskToEdit.description);
-    
-    const projName = (taskToEdit as any).projects?.name || meta.project_name || '';
-    const tagName = (taskToEdit as any).tags?.name || meta.tag_name || '';
-    const teamName = (taskToEdit as any).teams?.name || meta.team_name || '';
-    const dbNote = taskToEdit.description && !taskToEdit.description.startsWith('{') ? taskToEdit.description : (meta.note || '');
-
-    if (taskName.trim().toLowerCase() !== (taskToEdit.title || (taskToEdit as any).task_name || '').trim().toLowerCase()) return false;
-    if (project !== projName) return false;
-    if (team !== teamName) return false;
-    if (tag !== tagName) return false;
-    if (taskType !== (taskToEdit.task_type || (taskToEdit as any).type || '')) return false;
-    if (note.trim().toLowerCase() !== dbNote.trim().toLowerCase()) return false;
-    
-    const currentDeadlineTime = (taskToEdit as any).deadline_time || '';
-    const sourceTime24 = currentDeadlineTime ? convertTo24h(currentDeadlineTime) : '';
-    if (deadlineTime24h !== sourceTime24) return false;
-    
-    const daysInput = (taskToEdit as any).deadline_days;
-    const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : (daysInput || '');
+    if ((taskName || '').trim().toLowerCase() !== (originalValues.taskName || '').trim().toLowerCase()) return false;
+    if (project !== originalValues.project) return false;
+    if (team !== originalValues.team) return false;
+    if (tag !== originalValues.tag) return false;
+    if (taskType !== originalValues.taskType) return false;
+    if ((note || '').trim().toLowerCase() !== (originalValues.note || '').trim().toLowerCase()) return false;
+    if (deadlineTime24h !== originalValues.deadlineTime24h) return false;
 
     if (taskType === 'WEEKLY') {
-      const sourceDays = daysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
-      const isWeeklyEqual = selectedDays.length === sourceDays.length && selectedDays.every((d, i) => d === sourceDays[i]);
+      const isWeeklyEqual = selectedDays.length === originalValues.selectedDays.length &&
+        selectedDays.every((d, i) => d === originalValues.selectedDays[i]);
       if (!isWeeklyEqual) return false;
     } else if (taskType === 'MONTHLY') {
-      if (monthlyDays.trim() !== daysStr.trim()) return false;
+      if ((monthlyDays || '').trim() !== (originalValues.monthlyDays || '').trim()) return false;
     } else if (taskType === 'ONETIME') {
-      const dates = daysStr.includes('~') ? daysStr.split('~').map(d => d.trim()) : [daysStr.trim()];
-      const sourceStart = dates[0] || '';
-      const sourceEnd = dates[1] || dates[0] || '';
-      if (onetimeStartDate !== sourceStart || onetimeEndDate !== sourceEnd) return false;
+      if (onetimeStartDate !== originalValues.onetimeStartDate || onetimeEndDate !== originalValues.onetimeEndDate) return false;
     }
-    
-    const sourceSubtasks = taskToEdit.subtasks || [];
-    if (subTasks.length !== sourceSubtasks.length) return false;
+
+    if (subTasks.length !== originalValues.subTasks.length) return false;
     const isSubtasksEqual = subTasks.every((st, idx) => {
-      const orig = sourceSubtasks[idx];
+      const orig = originalValues.subTasks[idx];
       if (!orig) return false;
-      return st.content.trim().toLowerCase() === (orig.content || '').trim().toLowerCase() &&
-             st.assignee === orig.assignee &&
-             Number(st.est_time || (st as any).estimated_minutes) === Number(orig.est_time || orig.estimated_minutes);
+      const stEst = Number(st.est_time || (st as any).estimated_minutes || 0);
+      const origEst = Number(orig.est_time || orig.estimated_minutes || 0);
+      return (st.content || '').trim().toLowerCase() === (orig.content || '').trim().toLowerCase() &&
+             (st.assignee || '').trim() === (orig.assignee || '').trim() &&
+             stEst === origEst;
     });
     if (!isSubtasksEqual) return false;
 
     return true;
   }, [
-    taskToEdit,
+    isEditMode,
+    originalValues,
     taskName,
     project,
     team,

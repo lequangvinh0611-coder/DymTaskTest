@@ -111,6 +111,49 @@ const getDisplayId = (idOrTask: string | { id: string; display_id?: number | nul
   return String(positiveHash).padStart(6, '0');
 };
 
+const isSameVersion = (v1: any, v2: any): boolean => {
+  if (!v1 || !v2) return false;
+  const cleanStr = (s: any) => String(s || '').trim();
+  const normalizeTime = (t: any) => {
+    let s = cleanStr(t);
+    if (!s) return '';
+    if (s.includes(':')) {
+      const parts = s.split(':');
+      if (parts.length >= 2) {
+        return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+      }
+    }
+    return s;
+  };
+
+  const titleSame = cleanStr(v1.title || v1.task_name) === cleanStr(v2.title || v2.task_name);
+  const projectSame = cleanStr(v1.project_name) === cleanStr(v2.project_name);
+  const teamSame = cleanStr(v1.team_name) === cleanStr(v2.team_name);
+  const tagSame = cleanStr(v1.tag_name) === cleanStr(v2.tag_name);
+  const deadlineTimeSame = normalizeTime(v1.deadline_time) === normalizeTime(v2.deadline_time);
+  
+  const normDays = (d: any) => {
+    if (Array.isArray(d)) return d.map(cleanStr).sort().join(', ');
+    return cleanStr(d).split(',').map(cleanStr).sort().join(', ');
+  };
+  const deadlineDaysSame = normDays(v1.deadline_days) === normDays(v2.deadline_days);
+  
+  const estSame = Number(v1.est_time || v1.estimated_minutes || 0) === Number(v2.est_time || v2.estimated_minutes || 0);
+  const noteSame = cleanStr(v1.description || v1.note || v1.desc) === cleanStr(v2.description || v2.note || v2.desc);
+
+  const sub1 = Array.isArray(v1.sub_tasks) ? v1.sub_tasks : (Array.isArray(v1.subtasks) ? v1.subtasks : []);
+  const sub2 = Array.isArray(v2.sub_tasks) ? v2.sub_tasks : (Array.isArray(v2.subtasks) ? v2.subtasks : []);
+  
+  let subsSame = sub1.length === sub2.length;
+  if (subsSame) {
+    const sortedSub1 = [...sub1].map((s: any) => cleanStr(s.content)).sort();
+    const sortedSub2 = [...sub2].map((s: any) => cleanStr(s.content)).sort();
+    subsSame = sortedSub1.every((val, i) => val === sortedSub2[i]);
+  }
+
+  return titleSame && projectSame && teamSame && tagSame && deadlineTimeSame && deadlineDaysSame && estSame && noteSame && subsSame;
+};
+
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
     description: '',
@@ -200,8 +243,87 @@ const getYesterdayDateString = (todayStr: string): string => {
   return `${year}-${month}-${day}`;
 };
 
-const determineIsScheduledToday = (taskType: string, deadlineDays: any): boolean => {
+const normalizeDaysOfWeek = (dayStrOrArray: any): string[] => {
+  if (!dayStrOrArray) return [];
+  let rawArray: any[] = [];
+  if (Array.isArray(dayStrOrArray)) {
+    rawArray = dayStrOrArray;
+  } else {
+    const cleanStr = String(dayStrOrArray)
+      .replace(/[\{\}\[\]"']/g, '')
+      .trim();
+    rawArray = cleanStr.split(/[\s,/~]+/).map(d => d.trim()).filter(Boolean);
+  }
+    
+  const map: Record<string, string> = {
+    'mo': 'Mon', 'mon': 'Mon', 'monday': 'Mon',
+    'tu': 'Tue', 'tue': 'Tue', 'tuesday': 'Tue',
+    'we': 'Wed', 'wed': 'Wed', 'wednesday': 'Wed',
+    'th': 'Thu', 'thu': 'Thu', 'thursday': 'Thu',
+    'fr': 'Fri', 'fri': 'Fri', 'friday': 'Fri',
+    'sa': 'Sat', 'sat': 'Sat', 'saturday': 'Sat',
+    'su': 'Sun', 'sun': 'Sun', 'sunday': 'Sun'
+  };
+  
+  const results: string[] = [];
+  rawArray.forEach(d => {
+    const clean = String(d).toLowerCase().trim();
+    if (map[clean]) {
+      results.push(map[clean]);
+    }
+  });
+  return results;
+};
+
+const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesList: string[] } => {
+  let dates: string[] = [];
+  if (Array.isArray(daysInput)) {
+    dates = daysInput.map(d => String(d).trim()).filter(Boolean);
+  } else {
+    const trimmed = String(daysInput || '').trim();
+    if (trimmed.includes('~')) {
+      const parts = trimmed.split('~').map(d => d.trim()).filter(Boolean);
+      dates = parts;
+    } else if (trimmed.includes(',')) {
+      dates = trimmed.split(',').map(d => d.trim()).filter(Boolean);
+    } else if (trimmed) {
+      dates = [trimmed];
+    }
+  }
+
+  const cleanDates = dates.map(d => d.replace(/\//g, '-')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+  if (cleanDates.length === 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    return { start: today, end: today, datesList: [today] };
+  }
+
+  cleanDates.sort();
+  const start = cleanDates[0];
+  const end = cleanDates[cleanDates.length - 1];
+
+  const datesList = [];
+  try {
+    let curr = new Date(start);
+    const last = new Date(end);
+    while (curr <= last) {
+      datesList.push(curr.toISOString().slice(0, 10));
+      curr.setDate(curr.getDate() + 1);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  if (datesList.length === 0) {
+    return { start, end, datesList: cleanDates };
+  }
+
+  return { start, end, datesList };
+};
+
+const determineIsScheduledToday = (taskType: string, deadlineDays: any, onetimeTargets?: any[]): boolean => {
   const today = new Date();
+  const todayStr = getTodayDateString();
   const daysMap = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const todayDayName = daysMap[today.getDay()];
   const todayDateNum = today.getDate();
@@ -217,7 +339,8 @@ const determineIsScheduledToday = (taskType: string, deadlineDays: any): boolean
     } else if (Array.isArray(deadlineDays)) {
       daysArray = deadlineDays;
     }
-    return daysArray.includes(todayDayName);
+    const normalized = normalizeDaysOfWeek(daysArray);
+    return normalized.includes(todayDayName);
   }
   
   if (taskType === 'MONTHLY') {
@@ -232,6 +355,14 @@ const determineIsScheduledToday = (taskType: string, deadlineDays: any): boolean
 
   if (taskType === 'FLEXIBLE') {
     return true;
+  }
+
+  if (taskType === 'ONETIME') {
+    if (Array.isArray(onetimeTargets)) {
+      return onetimeTargets.some((t: any) => (t.date || t) === todayStr);
+    }
+    const { datesList } = parseOnetimeDates(deadlineDays);
+    return datesList.includes(todayStr);
   }
 
   return false;
@@ -270,6 +401,8 @@ const ApproveTask: React.FC = () => {
     request: any;
     isRecurring: boolean;
     isScheduledToday: boolean;
+    isOnetimeMultiDay?: boolean;
+    onetimeDaysCount?: number;
   } | null>(null);
 
   // Search & Filters state
@@ -939,13 +1072,17 @@ const ApproveTask: React.FC = () => {
 
     const isEditRequest = !!request.meta?.original_task_id;
     const isRecurring = request.task_type !== 'ONETIME';
+    const onetimeTargets = request.meta?.onetime_targets || [];
+    const isOnetimeMultiDay = request.task_type === 'ONETIME' && onetimeTargets.length > 1;
 
-    if (isEditRequest && isRecurring) {
-      const isScheduledToday = determineIsScheduledToday(request.task_type, request.meta.deadline_days);
+    if (isEditRequest && (isRecurring || isOnetimeMultiDay)) {
+      const isScheduledToday = determineIsScheduledToday(request.task_type, request.meta.deadline_days, onetimeTargets);
       setScopeDialogData({
         request,
-        isRecurring: true,
-        isScheduledToday
+        isRecurring,
+        isScheduledToday,
+        isOnetimeMultiDay,
+        onetimeDaysCount: onetimeTargets.length
       });
       setShowScopeDialog(true);
     } else {
@@ -1090,7 +1227,30 @@ const ApproveTask: React.FC = () => {
           .single()
           .then(({ data, error }) => {
             if (!error && data) {
-              const origMeta = parseTaskDescription(data.description);
+              const firstTeamName = data.subtasks?.find((s: any) => s.team_name)?.team_name || '';
+              const teamName = data.team_name || firstTeamName || '';
+              const origMeta = {
+                description: data.note || '',
+                project_name: data.project_name || '',
+                team_name: teamName,
+                tag_name: data.tag_name || '',
+                deadline_time: data.deadline_time || '17:00',
+                deadline_days: Array.isArray(data.deadline_days)
+                  ? data.deadline_days.join(', ')
+                  : String(data.deadline_days || 'Mon - Fri'),
+                sub_tasks: (data.subtasks || []).map((st: any) => ({
+                  id: st.id,
+                  content: st.content,
+                  assignee: st.assignee,
+                  est_time: st.est_time || st.estimated_minutes || 0
+                })),
+                note: data.note || '',
+                last_updated_by: '',
+                last_updated_at: '',
+                onetime_targets: [],
+                completions: {},
+                versions: data.history || []
+              };
               setOriginalTask({
                 ...data,
                 meta: origMeta
@@ -1365,19 +1525,27 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         }))
       };
       // Prevent duplicating current live version if it is already snapshotted as the latest entry in original history versions
-      const isAlreadyRepresented = list.some(item => 
-        (item.title === liveVer.title) && 
-        (item.project_name === liveVer.project_name) &&
-        (item.team_name === liveVer.team_name) &&
-        (item.tag_name === liveVer.tag_name) &&
-        (item.deadline_time === liveVer.deadline_time) &&
-        (Number(item.est_time) === Number(liveVer.est_time))
-      );
+      const isAlreadyRepresented = list.some(item => isSameVersion(item, liveVer));
       if (!isAlreadyRepresented) {
         list = [liveVer, ...list];
       }
     }
-    return list;
+
+    // Normalize date order for all history items (ensure valid_from <= valid_until chronologically)
+    return list.map(item => {
+      if (item.valid_from && item.valid_until && item.valid_until !== 'Present (Current Active)') {
+        const fromDate = new Date(item.valid_from);
+        const untilDate = new Date(item.valid_until);
+        if (!isNaN(fromDate.getTime()) && !isNaN(untilDate.getTime()) && fromDate > untilDate) {
+          return {
+            ...item,
+            valid_from: item.valid_until,
+            valid_until: item.valid_from
+          };
+        }
+      }
+      return item;
+    });
   }, [originalTask, drawerParsedMeta, openedDrawerTask]);
 
   return (
@@ -2242,16 +2410,22 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
             </h4>
             
             <div className="text-xs text-slate-600 space-y-2 leading-relaxed">
-              <p>
-                Bạn đang phê duyệt thay đổi cho một <strong>Task định kỳ / lặp lại</strong> ({scopeDialogData.request.task_type}).
-              </p>
+              {scopeDialogData.isOnetimeMultiDay ? (
+                <p>
+                  Bạn đang phê duyệt thay đổi cho một <strong>Task One-time diễn ra trong nhiều ngày</strong> ({scopeDialogData.onetimeDaysCount} ngày).
+                </p>
+              ) : (
+                <p>
+                  Bạn đang phê duyệt thay đổi cho một <strong>Task định kỳ / lặp lại</strong> ({scopeDialogData.request.task_type}).
+                </p>
+              )}
               {scopeDialogData.isScheduledToday ? (
                 <div className="p-2.5 bg-green-50 border border-green-100 text-green-800 rounded-lg">
-                  Hôm nay ({getTodayDateString()}) là ngày lặp diễn ra của task này. Bạn có thể chọn chỉ áp dụng thay đổi cho duy nhất hôm nay hoặc áp dụng cho cả tương lai.
+                  Hôm nay ({getTodayDateString()}) là ngày lặp/diễn ra sắp lịch của task này. Bạn có thể chọn chỉ áp dụng thay đổi cho duy nhất hôm nay hoặc áp dụng từ hôm nay trở đi.
                 </div>
               ) : (
                 <div className="p-2.5 bg-amber-50 border border-amber-100 text-amber-800 rounded-lg">
-                  Hôm nay ({getTodayDateString()}) <strong>không nằm trong lịch xuất hiện gốc</strong> của task này. Do đó, bạn chỉ có thể chọn áp dụng từ nay về sau.
+                  Hôm nay ({getTodayDateString()}) <strong>không nằm trong lịch xuất hiện sắp sẵn</strong> của task này. Do đó, bạn chỉ có thể chọn áp dụng từ nay về sau.
                 </div>
               )}
             </div>
