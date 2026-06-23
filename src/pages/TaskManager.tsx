@@ -26,20 +26,11 @@ interface SubTask {
 
 // Definition of metadata stored as robust JSON inside standard 'description' column
 interface TaskMetadata {
-  description?: string;
   project_name: string;
   team_name: string;
   tag_name: string;
-  deadline_time: string;
-  deadline_days: string;
-  sub_tasks?: any[];
   note: string;
-  completions?: any;
   versions?: any[];
-  onetime_targets?: any[];
-  last_updated_by?: string;
-  last_updated_at?: string;
-  original_task_id?: string | null;
 }
 
 // Database schema representation
@@ -94,17 +85,21 @@ const formatDisplayDate = (str?: any): string => {
     if (str.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => str.includes(d))) {
       return 'Mon - Fri';
     }
-    return str.map(s => String(s).trim()).join(', ');
+    const isAllDates = str.every(s => /^\d{4}-\d{2}-\d{2}$/.test(String(s).trim()));
+    if (isAllDates && str.length > 1) {
+      const sorted = [...str].map(s => String(s).trim()).sort();
+      const first = formatDisplayDate(sorted[0]);
+      const last = formatDisplayDate(sorted[sorted.length - 1]);
+      return first === last ? first : `${first} ~ ${last}`;
+    }
+    return str.map(s => formatDisplayDate(String(s).trim())).join(', ');
   }
   let trimmed = String(str).trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
     try {
       const arr = JSON.parse(trimmed);
       if (Array.isArray(arr)) {
-        if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
-          return 'Mon - Fri';
-        }
-        return arr.map(s => String(s).trim()).join(', ');
+        return formatDisplayDate(arr);
       }
     } catch (e) {
       // safe fallback
@@ -112,10 +107,7 @@ const formatDisplayDate = (str?: any): string => {
   }
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     const arr = trimmed.slice(1, -1).split(',').map(s => s.replace(/"/g, '').trim()).filter(Boolean);
-    if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
-      return 'Mon - Fri';
-    }
-    return arr.join(', ');
+    return formatDisplayDate(arr);
   }
   if (trimmed.includes('~')) {
     return trimmed.split('~').map(s => formatDisplayDate(s.trim())).join(' ~ ');
@@ -143,51 +135,25 @@ const formatDateTime = (isoString?: string): string => {
   return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
 };
 
-// Helper to parse complex data out of standard 'description' column or directly from flat DbTask properties
+// Helper to parse complex data out of standard 'description' column
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
-    description: '',
     project_name: '',
     team_name: '',
     tag_name: '',
-    deadline_time: '',
-    deadline_days: '',
-    sub_tasks: [],
     note: '',
-    completions: {},
-    versions: [],
-    onetime_targets: []
+    versions: []
   };
 
   if (!rawDescription) return defaultMeta;
 
   if (typeof rawDescription === 'object') {
-    // Detect if this is a DbTask or flat object with direct columns
-    const isDbTask = 'deadline_days' in rawDescription || 'deadline_time' in rawDescription || 'note' in rawDescription;
-    const sub_tasks = Array.isArray(rawDescription.sub_tasks || rawDescription.subtasks)
-      ? (rawDescription.sub_tasks || rawDescription.subtasks).map((st: any) => ({
-          id: st.id,
-          content: st.content || st.name || '',
-          assignee: st.assignee || '',
-          est_time: st.est_time || st.estimated_minutes || 0
-        }))
-      : [];
-
     return {
-      description: rawDescription.description || '',
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
+      team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
-      deadline_time: rawDescription.deadline_time || '',
-      deadline_days: rawDescription.deadline_days || '',
-      sub_tasks,
       note: rawDescription.note || rawDescription.description || '',
-      completions: rawDescription.completions || {},
-      versions: rawDescription.versions || rawDescription.history || [],
-      onetime_targets: rawDescription.onetime_targets || [],
-      last_updated_by: rawDescription.last_updated_by || '',
-      last_updated_at: rawDescription.last_updated_at || '',
-      original_task_id: rawDescription.original_task_id || (isDbTask ? rawDescription.id : null)
+      versions: rawDescription.versions || []
     };
   }
 
@@ -197,20 +163,11 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
       try {
         const parsed = JSON.parse(trimmed);
         return {
-          description: parsed.description || '',
           project_name: parsed.project_name || '',
           team_name: parsed.team_name || '',
           tag_name: parsed.tag_name || '',
-          deadline_time: parsed.deadline_time || '',
-          deadline_days: parsed.deadline_days || '',
-          sub_tasks: Array.isArray(parsed.sub_tasks) ? parsed.sub_tasks : [],
           note: parsed.note || parsed.description || '',
-          completions: parsed.completions || {},
-          versions: parsed.versions || parsed.history || [],
-          onetime_targets: parsed.onetime_targets || [],
-          last_updated_by: parsed.last_updated_by || '',
-          last_updated_at: parsed.last_updated_at || '',
-          original_task_id: parsed.original_task_id || null
+          versions: parsed.versions || []
         };
       } catch {
         // Fallback
@@ -690,7 +647,7 @@ const TaskManager: React.FC = () => {
   const [quickApprovingId, setQuickApprovingId] = useState<string | null>(null);
 
   const handleQuickApprove = (task: DbTask) => {
-    const meta = parseTaskDescription(task) as any;
+    const meta = parseTaskDescription(task.description) as any;
     const mappedSubtasks = ((task as any).subtasks || []).map((st: any) => ({
       id: st.id,
       content: st.content,
@@ -698,12 +655,16 @@ const TaskManager: React.FC = () => {
       est_time: st.est_time || st.estimated_minutes
     }));
     meta.sub_tasks = mappedSubtasks;
+    meta.deadline_days = Array.isArray((task as any).deadline_days)
+      ? (task as any).deadline_days.join(', ')
+      : (task as any).deadline_days || '';
+    meta.deadline_time = (task as any).deadline_time || '';
     
     // Update last updated info
     meta.last_updated_by = profile?.name || 'Unknown';
     meta.last_updated_at = new Date().toISOString();
 
-    const tempApproveTask: DbApproveTask & { sub_tasks?: any[] } = {
+    const tempApproveTask: DbApproveTask & { sub_tasks?: any[]; deadline_days?: any; deadline_time?: any } = {
       id: task.id,
       title: task.title,
       description: meta,
@@ -713,7 +674,9 @@ const TaskManager: React.FC = () => {
       actual_time: task.actual_time,
       user_id: profile?.id || undefined,
       created_at: new Date().toISOString(),
-      sub_tasks: mappedSubtasks
+      sub_tasks: mappedSubtasks,
+      deadline_days: (task as any).deadline_days,
+      deadline_time: (task as any).deadline_time
     };
 
     setApproveTaskToClone(tempApproveTask);
@@ -723,7 +686,7 @@ const TaskManager: React.FC = () => {
   };
 
   const handleOpenApproveEditModal = (task: DbTask) => {
-    const meta = parseTaskDescription(task) as any;
+    const meta = parseTaskDescription(task.description) as any;
     const mappedSubtasks = ((task as any).subtasks || []).map((st: any) => ({
       id: st.id,
       content: st.content,
@@ -731,12 +694,16 @@ const TaskManager: React.FC = () => {
       est_time: st.est_time || st.estimated_minutes
     }));
     meta.sub_tasks = mappedSubtasks;
+    meta.deadline_days = Array.isArray((task as any).deadline_days)
+      ? (task as any).deadline_days.join(', ')
+      : (task as any).deadline_days || '';
+    meta.deadline_time = (task as any).deadline_time || '';
 
     // Update last updated info
     meta.last_updated_by = profile?.name || 'Unknown';
     meta.last_updated_at = new Date().toISOString();
 
-    const tempApproveTask: DbApproveTask & { sub_tasks?: any[] } = {
+    const tempApproveTask: DbApproveTask & { sub_tasks?: any[]; deadline_days?: any; deadline_time?: any } = {
       id: task.id,
       title: task.title,
       description: meta,
@@ -746,7 +713,9 @@ const TaskManager: React.FC = () => {
       actual_time: task.actual_time,
       user_id: profile?.id || undefined,
       created_at: new Date().toISOString(),
-      sub_tasks: mappedSubtasks
+      sub_tasks: mappedSubtasks,
+      deadline_days: (task as any).deadline_days,
+      deadline_time: (task as any).deadline_time
     };
 
     setApproveTaskToClone(tempApproveTask);

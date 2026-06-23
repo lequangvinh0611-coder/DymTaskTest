@@ -152,6 +152,84 @@ const convertToDisplayTime = (time24: string): string => {
 
 // Helper representation of parsing functions
 
+const normalizeDaysOfWeek = (dayStrOrArray: any): string[] => {
+  if (!dayStrOrArray) return [];
+  let rawArray: any[] = [];
+  if (Array.isArray(dayStrOrArray)) {
+    rawArray = dayStrOrArray;
+  } else {
+    const cleanStr = String(dayStrOrArray)
+      .replace(/[\{\}\[\]"']/g, '')
+      .trim();
+    rawArray = cleanStr.split(/[\s,/~]+/).map(d => d.trim()).filter(Boolean);
+  }
+    
+  const map: Record<string, string> = {
+    'mo': 'Mon', 'mon': 'Mon', 'monday': 'Mon',
+    'tu': 'Tue', 'tue': 'Tue', 'tuesday': 'Tue',
+    'we': 'Wed', 'wed': 'Wed', 'wednesday': 'Wed',
+    'th': 'Thu', 'thu': 'Thu', 'thursday': 'Thu',
+    'fr': 'Fri', 'fri': 'Fri', 'friday': 'Fri',
+    'sa': 'Sat', 'sat': 'Sat', 'saturday': 'Sat',
+    'su': 'Sun', 'sun': 'Sun', 'sunday': 'Sun'
+  };
+  
+  const results: string[] = [];
+  rawArray.forEach(d => {
+    const clean = String(d).toLowerCase().trim();
+    if (map[clean]) {
+      results.push(map[clean]);
+    }
+  });
+  return results;
+};
+
+const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesList: string[] } => {
+  let dates: string[] = [];
+  if (Array.isArray(daysInput)) {
+    dates = daysInput.map(d => String(d).trim()).filter(Boolean);
+  } else {
+    const trimmed = String(daysInput || '').trim();
+    if (trimmed.includes('~')) {
+      const parts = trimmed.split('~').map(d => d.trim()).filter(Boolean);
+      dates = parts;
+    } else if (trimmed.includes(',')) {
+      dates = trimmed.split(',').map(d => d.trim()).filter(Boolean);
+    } else if (trimmed) {
+      dates = [trimmed];
+    }
+  }
+
+  const cleanDates = dates.map(d => d.replace(/\//g, '-')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+  if (cleanDates.length === 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    return { start: today, end: today, datesList: [today] };
+  }
+
+  cleanDates.sort();
+  const start = cleanDates[0];
+  const end = cleanDates[cleanDates.length - 1];
+
+  const datesList = [];
+  try {
+    let curr = new Date(start);
+    const last = new Date(end);
+    while (curr <= last) {
+      datesList.push(curr.toISOString().slice(0, 10));
+      curr.setDate(curr.getDate() + 1);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  if (datesList.length === 0) {
+    return { start, end, datesList: cleanDates };
+  }
+
+  return { start, end, datesList };
+};
+
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
     project_name: '',
@@ -165,7 +243,7 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   if (typeof rawDescription === 'object') {
     return {
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
+      team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
       note: rawDescription.note || rawDescription.description || ''
     };
@@ -331,22 +409,19 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         if (taskToEdit.task_type === 'DAILY') {
           // Defaults
         } else if (taskToEdit.task_type === 'WEEKLY') {
-          const parsed = daysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
+          const parsed = normalizeDaysOfWeek(daysInput);
           setSelectedDays(parsed);
         } else if (taskToEdit.task_type === 'MONTHLY') {
           setMonthlyDays(daysStr);
         } else if (taskToEdit.task_type === 'ONETIME') {
           setOneTimeDate(daysStr);
-          const dates = daysStr.includes('~') ? daysStr.split('~').map(d => d.trim()) : [daysStr.trim()];
-          const st = dates[0] || '';
-          const en = dates[1] || dates[0] || '';
-          setOnetimeStartDate(st);
-          setOnetimeEndDate(en);
-          const dateList = getDatesInRange(st, en);
-          setOnetimeTargets(dateList.map(dt => ({
+          const { start, end, datesList } = parseOnetimeDates(daysInput);
+          setOnetimeStartDate(start);
+          setOnetimeEndDate(end);
+          setOnetimeTargets(datesList.map(dt => ({
             id: Math.random().toString(36).substring(2, 9),
             date: dt,
-            time: currentDeadlineTime || '17:00'
+            time: convertTo24h(currentDeadlineTime || '17:00')
           })));
         }
 
@@ -387,22 +462,19 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         if (taskToClone.task_type === 'DAILY') {
           // Defaults
         } else if (taskToClone.task_type === 'WEEKLY') {
-          const parsed = daysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
+          const parsed = normalizeDaysOfWeek(daysInput);
           setSelectedDays(parsed);
         } else if (taskToClone.task_type === 'MONTHLY') {
           setMonthlyDays(daysStr);
         } else if (taskToClone.task_type === 'ONETIME') {
           setOneTimeDate(daysStr);
-          const dates = daysStr.includes('~') ? daysStr.split('~').map(d => d.trim()) : [daysStr.trim()];
-          const st = dates[0] || '';
-          const en = dates[1] || dates[0] || '';
-          setOnetimeStartDate(st);
-          setOnetimeEndDate(en);
-          const dateList = getDatesInRange(st, en);
-          setOnetimeTargets(dateList.map(dt => ({
+          const { start, end, datesList } = parseOnetimeDates(daysInput);
+          setOnetimeStartDate(start);
+          setOnetimeEndDate(end);
+          setOnetimeTargets(datesList.map(dt => ({
             id: Math.random().toString(36).substring(2, 9),
             date: dt,
-            time: currentDeadlineTime || '17:00'
+            time: convertTo24h(currentDeadlineTime || '17:00')
           })));
         }
 
@@ -725,7 +797,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         project_name: project || '',
         tag_name: tag || '',
         deadline_time: deadlineTime24h ? (deadlineTime24h.includes(':') && deadlineTime24h.split(':').length === 2 ? `${deadlineTime24h}:00` : deadlineTime24h) : null,
-        deadline_days: computedDeadlineDays,
+        deadline_days: deadlineDaysArray,
         history: updatedVersions
       };
 
@@ -751,7 +823,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           project_name: project || '',
           tag_name: tag || '',
           deadline_time: deadlineTime24h ? (deadlineTime24h.includes(':') && deadlineTime24h.split(':').length === 2 ? `${deadlineTime24h}:00` : deadlineTime24h) : null,
-          deadline_days: computedDeadlineDays,
+          deadline_days: deadlineDaysArray,
           task_type: taskType,
           est_time: totalEstMinutes,
           updated_by: updaterName,

@@ -129,6 +129,84 @@ const convertToDisplayTime = (time24: string): string => {
   return time24;
 };
 
+const normalizeDaysOfWeek = (dayStrOrArray: any): string[] => {
+  if (!dayStrOrArray) return [];
+  let rawArray: any[] = [];
+  if (Array.isArray(dayStrOrArray)) {
+    rawArray = dayStrOrArray;
+  } else {
+    const cleanStr = String(dayStrOrArray)
+      .replace(/[\{\}\[\]"']/g, '')
+      .trim();
+    rawArray = cleanStr.split(/[\s,/~]+/).map(d => d.trim()).filter(Boolean);
+  }
+    
+  const map: Record<string, string> = {
+    'mo': 'Mon', 'mon': 'Mon', 'monday': 'Mon',
+    'tu': 'Tue', 'tue': 'Tue', 'tuesday': 'Tue',
+    'we': 'Wed', 'wed': 'Wed', 'wednesday': 'Wed',
+    'th': 'Thu', 'thu': 'Thu', 'thursday': 'Thu',
+    'fr': 'Fri', 'fri': 'Fri', 'friday': 'Fri',
+    'sa': 'Sat', 'sat': 'Sat', 'saturday': 'Sat',
+    'su': 'Sun', 'sun': 'Sun', 'sunday': 'Sun'
+  };
+  
+  const results: string[] = [];
+  rawArray.forEach(d => {
+    const clean = String(d).toLowerCase().trim();
+    if (map[clean]) {
+      results.push(map[clean]);
+    }
+  });
+  return results;
+};
+
+const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesList: string[] } => {
+  let dates: string[] = [];
+  if (Array.isArray(daysInput)) {
+    dates = daysInput.map(d => String(d).trim()).filter(Boolean);
+  } else {
+    const trimmed = String(daysInput || '').trim();
+    if (trimmed.includes('~')) {
+      const parts = trimmed.split('~').map(d => d.trim()).filter(Boolean);
+      dates = parts;
+    } else if (trimmed.includes(',')) {
+      dates = trimmed.split(',').map(d => d.trim()).filter(Boolean);
+    } else if (trimmed) {
+      dates = [trimmed];
+    }
+  }
+
+  const cleanDates = dates.map(d => d.replace(/\//g, '-')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+  if (cleanDates.length === 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    return { start: today, end: today, datesList: [today] };
+  }
+
+  cleanDates.sort();
+  const start = cleanDates[0];
+  const end = cleanDates[cleanDates.length - 1];
+
+  const datesList = [];
+  try {
+    let curr = new Date(start);
+    const last = new Date(end);
+    while (curr <= last) {
+      datesList.push(curr.toISOString().slice(0, 10));
+      curr.setDate(curr.getDate() + 1);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  if (datesList.length === 0) {
+    return { start, end, datesList: cleanDates };
+  }
+
+  return { start, end, datesList };
+};
+
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
     description: '',
@@ -146,31 +224,21 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   if (!rawDescription) return defaultMeta;
 
   if (typeof rawDescription === 'object') {
-    const isDbTask = 'deadline_days' in rawDescription || 'deadline_time' in rawDescription || 'note' in rawDescription;
-    const sub_tasks = Array.isArray(rawDescription.sub_tasks || rawDescription.subtasks)
-      ? (rawDescription.sub_tasks || rawDescription.subtasks).map((st: any) => ({
-          id: st.id,
-          content: st.content || st.name || '',
-          assignee: st.assignee || '',
-          est_time: st.est_time || st.estimated_minutes || 0
-        }))
-      : [];
-
     return {
       description: rawDescription.description || '',
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
+      team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
       deadline_time: rawDescription.deadline_time || '09:00 AM',
       deadline_days: rawDescription.deadline_days || 'Mon - Fri',
-      sub_tasks,
-      note: rawDescription.note || rawDescription.description || '',
+      sub_tasks: Array.isArray(rawDescription.sub_tasks) ? rawDescription.sub_tasks : [],
+      note: rawDescription.note || '',
       last_updated_by: rawDescription.last_updated_by || '',
       last_updated_at: rawDescription.last_updated_at || '',
-      original_task_id: rawDescription.original_task_id || (isDbTask ? rawDescription.id : null),
+      original_task_id: rawDescription.original_task_id || null,
       onetime_targets: rawDescription.onetime_targets || [],
       completions: rawDescription.completions || {},
-      versions: rawDescription.versions || rawDescription.history || []
+      versions: rawDescription.versions || []
     };
   }
 
@@ -319,7 +387,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         if (taskToEdit.task_type === 'DAILY') {
           // Default
         } else if (taskToEdit.task_type === 'WEEKLY') {
-          const parsed = daysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
+          const parsed = normalizeDaysOfWeek(daysInput);
           setSelectedDays(parsed);
         } else if (taskToEdit.task_type === 'MONTHLY') {
           setMonthlyDays(daysStr);
@@ -336,9 +404,14 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
               time: convertTo24h(tgt.time)
             })));
           } else {
-            setOnetimeStartDate(daysStr);
-            setOnetimeEndDate(daysStr);
-            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || (taskToEdit as any).deadline_time || '17:00') }]);
+            const { start, end, datesList } = parseOnetimeDates(daysInput);
+            setOnetimeStartDate(start);
+            setOnetimeEndDate(end);
+            setOnetimeTargets(datesList.map((dt, idx) => ({
+              id: String(idx + 1),
+              date: dt,
+              time: convertTo24h(meta.deadline_time || (taskToEdit as any).deadline_time || '17:00')
+            })));
           }
         }
 
@@ -364,7 +437,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         if (taskToClone.task_type === 'DAILY') {
           // Default
         } else if (taskToClone.task_type === 'WEEKLY') {
-          const parsed = daysStr.split(/[\s,]+/).map(d => d.trim()).filter(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(d));
+          const parsed = normalizeDaysOfWeek(daysInput);
           setSelectedDays(parsed);
         } else if (taskToClone.task_type === 'MONTHLY') {
           setMonthlyDays(daysStr);
@@ -381,9 +454,14 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
               time: convertTo24h(tgt.time)
             })));
           } else {
-            setOnetimeStartDate(daysStr);
-            setOnetimeEndDate(daysStr);
-            setOnetimeTargets([{ id: '1', date: daysStr, time: convertTo24h(meta.deadline_time || (taskToClone as any).deadline_time || '17:00') }]);
+            const { start, end, datesList } = parseOnetimeDates(daysInput);
+            setOnetimeStartDate(start);
+            setOnetimeEndDate(end);
+            setOnetimeTargets(datesList.map((dt, idx) => ({
+              id: String(idx + 1),
+              date: dt,
+              time: convertTo24h(meta.deadline_time || (taskToClone as any).deadline_time || '17:00')
+            })));
           }
         }
 

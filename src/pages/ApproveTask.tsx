@@ -57,17 +57,21 @@ const formatDisplayDate = (str?: any): string => {
     if (str.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => str.includes(d))) {
       return 'Mon - Fri';
     }
-    return str.map(s => String(s).trim()).join(', ');
+    const isAllDates = str.every(s => /^\d{4}-\d{2}-\d{2}$/.test(String(s).trim()));
+    if (isAllDates && str.length > 1) {
+      const sorted = [...str].map(s => String(s).trim()).sort();
+      const first = formatDisplayDate(sorted[0]);
+      const last = formatDisplayDate(sorted[sorted.length - 1]);
+      return first === last ? first : `${first} ~ ${last}`;
+    }
+    return str.map(s => formatDisplayDate(String(s).trim())).join(', ');
   }
   let trimmed = String(str).trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
     try {
       const arr = JSON.parse(trimmed);
       if (Array.isArray(arr)) {
-        if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
-          return 'Mon - Fri';
-        }
-        return arr.map(s => String(s).trim()).join(', ');
+        return formatDisplayDate(arr);
       }
     } catch (e) {
       // safe fallback
@@ -75,10 +79,7 @@ const formatDisplayDate = (str?: any): string => {
   }
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     const arr = trimmed.slice(1, -1).split(',').map(s => s.replace(/"/g, '').trim()).filter(Boolean);
-    if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
-      return 'Mon - Fri';
-    }
-    return arr.join(', ');
+    return formatDisplayDate(arr);
   }
   if (trimmed.includes('~')) {
     return trimmed.split('~').map(s => formatDisplayDate(s.trim())).join(' ~ ');
@@ -130,31 +131,21 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   if (!rawDescription) return defaultMeta;
 
   if (typeof rawDescription === 'object') {
-    const isDbTask = 'deadline_days' in rawDescription || 'deadline_time' in rawDescription || 'note' in rawDescription;
-    const sub_tasks = Array.isArray(rawDescription.sub_tasks || rawDescription.subtasks)
-      ? (rawDescription.sub_tasks || rawDescription.subtasks).map((st: any) => ({
-          id: st.id,
-          content: st.content || st.name || '',
-          assignee: st.assignee || '',
-          est_time: st.est_time || st.estimated_minutes || 0
-        }))
-      : [];
-
     return {
       description: rawDescription.description || '',
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
+      team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
       deadline_time: rawDescription.deadline_time || '17:00',
       deadline_days: rawDescription.deadline_days || 'Mon - Fri',
-      sub_tasks,
-      note: rawDescription.note || rawDescription.description || '',
+      sub_tasks: Array.isArray(rawDescription.sub_tasks) ? rawDescription.sub_tasks : [],
+      note: rawDescription.note || '',
       last_updated_by: rawDescription.last_updated_by || '',
       last_updated_at: rawDescription.last_updated_at || '',
-      original_task_id: rawDescription.original_task_id || (isDbTask ? rawDescription.id : null),
+      original_task_id: rawDescription.original_task_id || null,
       onetime_targets: Array.isArray(rawDescription.onetime_targets) ? rawDescription.onetime_targets : [],
       completions: rawDescription.completions || {},
-      versions: rawDescription.versions || rawDescription.history || []
+      versions: rawDescription.versions || []
     };
   }
 
@@ -661,7 +652,7 @@ const ApproveTask: React.FC = () => {
           toast.success(`Request accepted! Changes applied only for today's instance of task "${request.title}".`);
         } else {
           // --- FUTURE: Standard Template and Subtasks Delta sync ---
-          const latestMeta = parseTaskDescription(originalTask);
+          const latestMeta = parseTaskDescription(originalTask.description);
           
           // Fetch actual live subtasks of the original task template to preserve in oldVersion history
           const { data: originalSubs } = await supabase

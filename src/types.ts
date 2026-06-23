@@ -169,8 +169,6 @@ const parseTaskDescriptionLocal = (rawDescription: any) => {
     team_name: '',
     tag_name: '',
     note: '',
-    deadline_days: '',
-    deadline_time: '',
     versions: [] as any[]
   };
 
@@ -179,12 +177,10 @@ const parseTaskDescriptionLocal = (rawDescription: any) => {
   if (typeof rawDescription === 'object') {
     return {
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
+      team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
-      deadline_days: rawDescription.deadline_days || '',
-      deadline_time: rawDescription.deadline_time || '',
       note: rawDescription.note || rawDescription.description || '',
-      versions: rawDescription.versions || rawDescription.history || []
+      versions: rawDescription.versions || []
     };
   }
 
@@ -197,10 +193,8 @@ const parseTaskDescriptionLocal = (rawDescription: any) => {
           project_name: parsed.project_name || '',
           team_name: parsed.team_name || '',
           tag_name: parsed.tag_name || '',
-          deadline_days: parsed.deadline_days || '',
-          deadline_time: parsed.deadline_time || '',
           note: parsed.note || parsed.description || '',
-          versions: parsed.versions || parsed.history || []
+          versions: parsed.versions || []
         };
       } catch {
         // Fallback
@@ -369,9 +363,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           tag_name: tagName,
           note: noteText,
           sub_tasks,
-          versions: taskHistory,
-          deadline_days: task.deadline_days || '',
-          deadline_time: task.deadline_time || ''
+          versions: taskHistory
         };
         const completions: Record<string, any> = {};
 

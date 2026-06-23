@@ -334,17 +334,21 @@ const formatDisplayDate = (str?: any): string => {
     if (str.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => str.includes(d))) {
       return 'Mon - Fri';
     }
-    return str.map(s => String(s).trim()).join(', ');
+    const isAllDates = str.every(s => /^\d{4}-\d{2}-\d{2}$/.test(String(s).trim()));
+    if (isAllDates && str.length > 1) {
+      const sorted = [...str].map(s => String(s).trim()).sort();
+      const first = formatDisplayDate(sorted[0]);
+      const last = formatDisplayDate(sorted[sorted.length - 1]);
+      return first === last ? first : `${first} ~ ${last}`;
+    }
+    return str.map(s => formatDisplayDate(String(s).trim())).join(', ');
   }
   let trimmed = String(str).trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
     try {
       const arr = JSON.parse(trimmed);
       if (Array.isArray(arr)) {
-        if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
-          return 'Mon - Fri';
-        }
-        return arr.map(s => String(s).trim()).join(', ');
+        return formatDisplayDate(arr);
       }
     } catch (e) {
       // safe fallback
@@ -352,10 +356,7 @@ const formatDisplayDate = (str?: any): string => {
   }
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     const arr = trimmed.slice(1, -1).split(',').map(s => s.replace(/"/g, '').trim()).filter(Boolean);
-    if (arr.length === 5 && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].every(d => arr.includes(d))) {
-      return 'Mon - Fri';
-    }
-    return arr.join(', ');
+    return formatDisplayDate(arr);
   }
   if (trimmed.includes('~')) {
     return trimmed.split('~').map(s => formatDisplayDate(s.trim())).join(' ~ ');
@@ -426,7 +427,7 @@ const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   if (typeof rawDescription === 'object') {
     return {
       project_name: rawDescription.project_name || '',
-      team_name: rawDescription.team_name || (rawDescription.subtasks?.find((s: any) => s.team_name)?.team_name) || '',
+      team_name: rawDescription.team_name || '',
       tag_name: rawDescription.tag_name || '',
       note: rawDescription.note || rawDescription.description || ''
     };
