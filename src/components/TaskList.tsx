@@ -19,8 +19,8 @@ interface SubTask {
   id: string;
   content: string;
   assignee: string;
-  estimated_minutes: number;
-  actual_minutes?: number; // Realized minutes tracked for To-do
+  est_time: number;
+  actual_time?: number; // Realized minutes tracked for To-do
   sub_status?: 'New' | 'Done' | 'Skipped'; // Status of individual sub-task
   last_updated_by?: string;
   last_updated_at?: string;
@@ -760,8 +760,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 name: log.content || '',
                 content: log.content || '',
                 assignee: log.assignee || '',
-                estimated_minutes: log.estimated_minutes !== undefined ? log.estimated_minutes : 0,
-                actual_minutes: log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? log.estimated_minutes : 0),
+                est_time: log.est_time !== undefined && log.est_time !== null ? log.est_time : (log.estimated_minutes !== undefined ? log.estimated_minutes : 0),
+                actual_time: log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : (log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? (log.est_time || log.estimated_minutes || 0) : 0)),
                 sub_status,
                 team_name: log.team_name || ''
               };
@@ -778,10 +778,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 else if (log.is_completed) sub_status = 'Done';
               }
 
-              const log_actual = log ? log.actual_minutes : undefined;
+              const log_actual = log ? (log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : log.actual_minutes) : undefined;
               let resolved_actual = undefined;
               if (sub_status === 'Done') {
-                resolved_actual = log_actual !== undefined && log_actual !== null ? log_actual : sub.estimated_minutes;
+                resolved_actual = log_actual !== undefined && log_actual !== null ? log_actual : (sub.est_time || sub.estimated_minutes);
               } else if (sub_status === 'Skipped') {
                 resolved_actual = 0;
               } else {
@@ -794,8 +794,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 name: sub.name || sub.content,
                 content: sub.content || sub.name,
                 assignee: sub.assignee,
-                estimated_minutes: sub.estimated_minutes,
-                actual_minutes: resolved_actual,
+                est_time: sub.est_time !== undefined ? sub.est_time : (sub.estimated_minutes || 0),
+                actual_time: resolved_actual,
                 sub_status
               };
             });
@@ -804,9 +804,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           // Sum calculations for parent est_time and actual_time
           const calc_est_time = (isDoneOrSkipped && matchedLog && matchedLog.est_time !== undefined && matchedLog.est_time !== null)
             ? matchedLog.est_time
-            : sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+            : sub_tasks.reduce((sum, s) => sum + (Number(s.est_time) || 0), 0);
           
-          const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
+          const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_time) || 0) : 0), 0);
 
           list.push({
             ...task,
@@ -890,8 +890,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   name: log.content || '',
                   content: log.content || '',
                   assignee: log.assignee || '',
-                  estimated_minutes: log.estimated_minutes !== undefined ? log.estimated_minutes : 0,
-                  actual_minutes: log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? log.estimated_minutes : 0),
+                  est_time: log.est_time !== undefined && log.est_time !== null ? log.est_time : (log.estimated_minutes !== undefined ? log.estimated_minutes : 0),
+                  actual_time: log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : (log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? (log.est_time || log.estimated_minutes || 0) : 0)),
                   sub_status,
                   team_name: log.team_name || ''
                 };
@@ -907,10 +907,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   else if (sUpper === 'NEW') sub_status = 'New';
                   else if (log.is_completed) sub_status = 'Done';
                 }
-                const log_actual = log ? log.actual_minutes : undefined;
+                const log_actual = log ? (log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : log.actual_minutes) : undefined;
                 let resolved_actual = undefined;
                 if (sub_status === 'Done') {
-                  resolved_actual = log_actual !== undefined && log_actual !== null ? log_actual : (sub.estimated_minutes !== undefined ? sub.estimated_minutes : 0);
+                  resolved_actual = log_actual !== undefined && log_actual !== null ? log_actual : (sub.est_time !== undefined && sub.est_time !== null ? sub.est_time : (sub.estimated_minutes !== undefined ? sub.estimated_minutes : 0));
                 } else if (sub_status === 'Skipped') {
                   resolved_actual = 0;
                 } else {
@@ -922,8 +922,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   name: sub.name || sub.content,
                   content: sub.content || sub.name,
                   assignee: sub.assignee,
-                  estimated_minutes: sub.estimated_minutes,
-                  actual_minutes: resolved_actual,
+                  est_time: sub.est_time !== undefined ? sub.est_time : (sub.estimated_minutes || 0),
+                  actual_time: resolved_actual,
                   sub_status
                 };
               });
@@ -931,9 +931,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
             const calc_est_time = (isDoneOrSkipped && matchedLog && matchedLog.est_time !== undefined && matchedLog.est_time !== null)
               ? matchedLog.est_time
-              : sub_tasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+              : sub_tasks.reduce((sum, s) => sum + (Number(s.est_time) || 0), 0);
 
-            const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || 0) : 0), 0);
+            const calc_actual_time = sub_tasks.reduce((sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_time) || 0) : 0), 0);
 
             list.push({
               ...task,
@@ -1172,11 +1172,17 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     try {
       const updaterName = activeUser?.name || profile?.name || currentUser?.email || 'System';
 
+      const calculatedActual = (task.sub_tasks || []).reduce(
+        (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_time) || Number((s as any).actual_minutes) || s.est_time || (s as any).estimated_minutes || 0) : (s.est_time || (s as any).estimated_minutes || 0)),
+        0
+      ) || task.est_time || 0;
+
       // 1. Determine status of subtasks and build the log payloads
       const subtaskLogsToSave = (task.sub_tasks || []).map(sub => {
         const rawStatus = sub.sub_status || 'New';
         const finalStatus = rawStatus === 'Skipped' ? 'SKIPPED' : 'DONE';
         const isCompleted = finalStatus === 'DONE';
+        const calcAct = finalStatus === 'DONE' ? (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : (sub.actual_minutes !== undefined && sub.actual_minutes !== null ? sub.actual_minutes : (sub.estimated_minutes || sub.est_time || 0))) : 0;
         
         return {
           subtask_id: sub.id,
@@ -1188,8 +1194,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           team_name: sub.team_name || '',
           content: sub.content || sub.name || '',
           assignee: sub.assignee || '',
-          estimated_minutes: sub.estimated_minutes || 0,
-          actual_minutes: finalStatus === 'DONE' ? (sub.actual_minutes !== undefined && sub.actual_minutes !== null ? sub.actual_minutes : (sub.estimated_minutes || 0)) : 0
+          est_time: sub.est_time || (sub as any).estimated_minutes || 0,
+          actual_time: calcAct
         };
       });
 
@@ -1220,7 +1226,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           deadline_time: task.deadline_time || '17:00',
           deadline_days: task.deadline_days || '',
           task_type: task.task_type || 'DAILY',
-          est_time: task.est_time || 0
+          est_time: task.est_time || 0,
+          actual_time: calculatedActual
         }, {
           onConflict: 'task_id,todo_date'
         });
@@ -1245,7 +1252,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               deadline_time: task.deadline_time || '17:00',
               deadline_days: task.deadline_days || '',
               task_type: task.task_type || 'DAILY',
-              est_time: task.est_time || 0
+              est_time: task.est_time || 0,
+              actual_time: calculatedActual
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -1314,19 +1322,19 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     }
 
     try {
-      // 1. Update task log to NEW and actual_minutes to 0
+      // 1. Update task log to NEW and actual_time to 0
       const { error: logErr } = await supabase
         .from('task_logs')
-        .update({ status: 'NEW', actual_minutes: 0 })
+        .update({ status: 'NEW', actual_time: 0 })
         .eq('task_id', task.id)
         .eq('todo_date', task.todo_date);
 
       if (logErr) throw logErr;
 
-      // 2. Update subtask logs to NEW, is_completed = false, actual_minutes = 0
+      // 2. Update subtask logs to NEW, is_completed = false, actual_time to 0
       const { error: subLogsErr } = await supabase
         .from('subtask_logs')
-        .update({ status: 'NEW', is_completed: false, actual_minutes: 0 })
+        .update({ status: 'NEW', is_completed: false, actual_time: 0 })
         .eq('task_id', task.id)
         .eq('todo_date', task.todo_date);
 
@@ -1338,14 +1346,14 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           if (t.id === task.id) {
             const logs = (t.task_logs || []).map((l: any) => {
               if (l.todo_date === task.todo_date) {
-                return { ...l, status: 'NEW', actual_minutes: 0 };
+                return { ...l, status: 'NEW', actual_time: 0 };
               }
               return l;
             });
             
             const globalSubLogs = (t.subtask_logs || []).map((sl: any) => {
               if (sl.todo_date === task.todo_date) {
-                return { ...sl, status: 'NEW', is_completed: false, actual_minutes: 0 };
+                return { ...sl, status: 'NEW', is_completed: false, actual_time: 0 };
               }
               return sl;
             });
@@ -1353,7 +1361,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             const nextSubtasks = (t.subtasks || []).map((subItem: any) => {
               const subLogs = (subItem.subtask_logs || []).map((sl: any) => {
                 if (sl.todo_date === task.todo_date) {
-                  return { ...sl, status: 'NEW', is_completed: false, actual_minutes: 0 };
+                  return { ...sl, status: 'NEW', is_completed: false, actual_time: 0 };
                 }
                 return sl;
               });
@@ -1379,7 +1387,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           sub_tasks: (openedTask.sub_tasks || []).map(st => ({
             ...st,
             sub_status: 'New',
-            actual_minutes: 0
+            actual_time: 0
           }))
         });
       }
@@ -1433,7 +1441,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             team_name: sub.team_name || '',
             content: sub.content || sub.name || '',
             assignee: sub.assignee || '',
-            estimated_minutes: sub.estimated_minutes || 0
+            est_time: sub.est_time || (sub as any).estimated_minutes || 0,
+            actual_time: 0
           }, {
             onConflict: 'subtask_id,todo_date'
           });
@@ -1457,7 +1466,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               deadline_time: task.deadline_time || '17:00',
               deadline_days: task.deadline_days || '',
               task_type: task.task_type || 'DAILY',
-              est_time: task.est_time || 0
+              est_time: task.est_time || 0,
+              actual_time: 0
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -1478,7 +1488,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 completed_by: updaterName,
                 content: subItem.content || subItem.name || '',
                 assignee: subItem.assignee || '',
-                estimated_minutes: subItem.estimated_minutes || 0
+                est_time: subItem.est_time || 0,
+                actual_time: 0
               };
               if (subLogIndex >= 0) {
                 subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -1501,7 +1512,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 completed_by: updaterName,
                 content: sub.content || sub.name || '',
                 assignee: sub.assignee || '',
-                estimated_minutes: sub.estimated_minutes || 0
+                est_time: sub.est_time || 0,
+                actual_time: 0
               };
               if (slIdx >= 0) {
                 nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
@@ -1541,13 +1553,13 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   // Update specific sub-task work characteristics (Actual Minutes or Status) inside the drawer locally
   const handleUpdateSubtaskValueLocal = (
     subtaskId: string, 
-    fields: Partial<Pick<SubTask, 'actual_minutes' | 'sub_status'>>
+    fields: Partial<Pick<SubTask, 'actual_time' | 'sub_status'>>
   ) => {
     if (!openedTask) return;
 
     const updatedSubTasks = (openedTask.sub_tasks || []).map(sub => {
       if (sub.id === subtaskId) {
-        const incomingMinutes = fields.actual_minutes;
+        const incomingMinutes = fields.actual_time;
         const boundedMinutes = incomingMinutes !== undefined 
           ? Math.min(10000, Math.max(0, incomingMinutes)) 
           : undefined;
@@ -1555,7 +1567,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         return {
           ...sub,
           ...fields,
-          ...(boundedMinutes !== undefined ? { actual_minutes: boundedMinutes } : {}),
+          ...(boundedMinutes !== undefined ? { actual_time: boundedMinutes } : {}),
           last_updated_by: activeUser?.name || 'Unknown',
           last_updated_at: new Date().toISOString()
         };
@@ -1564,8 +1576,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     });
 
     // Always calculate parent's total est_time and actual_time as the sum of subtasks
-    const calculated_est_time = updatedSubTasks.reduce((sum, sub) => sum + (Number(sub.estimated_minutes) || 0), 0);
-    const calculated_actual_time = updatedSubTasks.reduce((sum, sub) => sum + (sub.sub_status === 'Done' ? (Number(sub.actual_minutes) || 0) : 0), 0);
+    const calculated_est_time = updatedSubTasks.reduce((sum, sub) => sum + (Number(sub.est_time) || 0), 0);
+    const calculated_actual_time = updatedSubTasks.reduce((sum, sub) => sum + (sub.sub_status === 'Done' ? (Number(sub.actual_time) || 0) : 0), 0);
 
     setOpenedTask({
       ...openedTask,
@@ -1586,6 +1598,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         const nextVal = sub.sub_status || 'New';
         const statusUpper = nextVal.toUpperCase();
         const isCompleted = nextVal === 'Done';
+        const calcAct = isCompleted ? (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined && (sub as any).actual_minutes !== null ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0))) : 0;
         
         await supabase
           .from('subtask_logs')
@@ -1599,7 +1612,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             team_name: sub.team_name || '',
             content: sub.content || sub.name || '',
             assignee: sub.assignee || '',
-            estimated_minutes: sub.estimated_minutes || 0
+            est_time: sub.est_time || (sub as any).estimated_minutes || 0,
+            actual_time: calcAct
           }, {
             onConflict: 'subtask_id,todo_date'
           });
@@ -1611,6 +1625,11 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       
       const newStatus = allSkipped ? 'SKIPPED' : (hasNewSubTask ? 'NEW' : 'DONE');
       
+      const calculatedActual = (taskToSave.sub_tasks || []).reduce(
+        (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_time) || Number((s as any).actual_minutes) || s.est_time || (s as any).estimated_minutes || 0) : (s.est_time || (s as any).estimated_minutes || 0)),
+        0
+      ) || taskToSave.est_time || 0;
+
       await supabase
         .from('task_logs')
         .upsert({
@@ -1624,7 +1643,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           deadline_time: taskToSave.deadline_time || '17:00',
           deadline_days: taskToSave.deadline_days || '',
           task_type: taskToSave.task_type || 'DAILY',
-          est_time: taskToSave.est_time || 0
+          est_time: taskToSave.est_time || 0,
+          actual_time: calculatedActual
         }, {
           onConflict: 'task_id,todo_date'
         });
@@ -1647,7 +1667,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               deadline_time: taskToSave.deadline_time || '17:00',
               deadline_days: taskToSave.deadline_days || '',
               task_type: taskToSave.task_type || 'DAILY',
-              est_time: taskToSave.est_time || 0
+              est_time: taskToSave.est_time || 0,
+              actual_time: calculatedActual
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -1661,6 +1682,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               if (matchingSubToSave) {
                 const subLogs = [...(subItem.subtask_logs || [])];
                 const subLogIndex = subLogs.findIndex((sl: any) => sl.todo_date === taskToSave.todo_date);
+                const calcSubAct = matchingSubToSave.sub_status === 'Done' ? (matchingSubToSave.actual_time !== undefined && matchingSubToSave.actual_time !== null ? matchingSubToSave.actual_time : ((matchingSubToSave as any).actual_minutes !== undefined && (matchingSubToSave as any).actual_minutes !== null ? (matchingSubToSave as any).actual_minutes : (matchingSubToSave.est_time || (matchingSubToSave as any).estimated_minutes || 0))) : 0;
                 const subLogPayload = {
                   subtask_id: subItem.id,
                   task_id: taskToSave.id,
@@ -1670,7 +1692,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   completed_by: completedBy,
                   content: matchingSubToSave.content || matchingSubToSave.name || '',
                   assignee: matchingSubToSave.assignee || '',
-                  estimated_minutes: matchingSubToSave.estimated_minutes || 0
+                  est_time: matchingSubToSave.est_time || 0,
+                  actual_time: calcSubAct
                 };
                 if (subLogIndex >= 0) {
                   subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -1689,6 +1712,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             const nextGlobalSubLogs = [...(t.subtask_logs || [])];
             (taskToSave.sub_tasks || []).forEach(sub => {
               const slIdx = nextGlobalSubLogs.findIndex(sl => sl.subtask_id === sub.id && sl.todo_date === taskToSave.todo_date);
+              const calcGlobalAct = sub.sub_status === 'Done' ? (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined && (sub as any).actual_minutes !== null ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0))) : 0;
               const payload = {
                 subtask_id: sub.id,
                 task_id: taskToSave.id,
@@ -1698,7 +1722,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 completed_by: completedBy,
                 content: sub.content || sub.name || '',
                 assignee: sub.assignee || '',
-                estimated_minutes: sub.estimated_minutes || 0
+                est_time: sub.est_time || 0,
+                actual_time: calcGlobalAct
               };
               if (slIdx >= 0) {
                 nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
@@ -1905,7 +1930,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               ...parentInfo,
               `"${(sub.content || '').replace(/"/g, '""')}"`,
               `"${(sub.assignee || '').replace(/"/g, '""')}"`,
-              `"${sub.sub_status === 'Skipped' ? 0 : (sub.actual_minutes !== undefined ? sub.actual_minutes : (sub.estimated_minutes || 0))}m"`,
+              `"${sub.sub_status === 'Skipped' ? 0 : (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0)))}m"`,
               `"${sub.sub_status || 'New'}"`,
               `"${(lastUpdatedUserCsv || sub.last_updated_by || '').replace(/"/g, '""')}"`,
               `"${lastUpdatedTimeCsv || formatDateTime(sub.last_updated_at)}"`
@@ -1967,7 +1992,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           deadline_days: taskObj.deadline_days || '',
           task_type: taskObj.task_type || 'DAILY',
           est_time: taskObj.est_time || 0,
-          actual_minutes: 0
+          actual_time: 0
         });
 
         (taskObj.sub_tasks || []).forEach(sub => {
@@ -1981,8 +2006,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             team_name: sub.team_name || '',
             content: sub.content || sub.name || '',
             assignee: sub.assignee || '',
-            estimated_minutes: sub.estimated_minutes || 0,
-            actual_minutes: 0
+            est_time: sub.estimated_minutes || sub.est_time || 0,
+            actual_time: 0
           });
         });
 
@@ -2027,7 +2052,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               deadline_days: originTaskObj.deadline_days || '',
               task_type: originTaskObj.task_type || 'DAILY',
               est_time: originTaskObj.est_time || 0,
-              actual_minutes: 0
+              actual_time: 0
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -2048,8 +2073,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 completed_by: updaterName,
                 content: subItem.content || subItem.name || '',
                 assignee: subItem.assignee || '',
-                estimated_minutes: subItem.estimated_minutes || 0,
-                actual_minutes: 0
+                est_time: subItem.est_time || 0,
+                actual_time: 0
               };
               if (subLogIndex >= 0) {
                 subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -2072,8 +2097,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 completed_by: updaterName,
                 content: sub.content || sub.name || '',
                 assignee: sub.assignee || '',
-                estimated_minutes: sub.estimated_minutes || 0,
-                actual_minutes: 0
+                est_time: sub.est_time || 0,
+                actual_time: 0
               };
               if (slIdx >= 0) {
                 nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
@@ -2140,7 +2165,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         if (!taskObj) continue;
 
         const calculatedActual = taskObj.sub_tasks?.reduce(
-          (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || s.estimated_minutes || 0) : (s.estimated_minutes || 0)),
+          (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_time) || Number((s as any).actual_minutes) || s.est_time || (s as any).estimated_minutes || 0) : (s.est_time || (s as any).estimated_minutes || 0)),
           0
         ) || taskObj.est_time || 0;
 
@@ -2156,11 +2181,11 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           deadline_days: taskObj.deadline_days || '',
           task_type: taskObj.task_type || 'DAILY',
           est_time: taskObj.est_time || 0,
-          actual_minutes: calculatedActual
+          actual_time: calculatedActual
         });
 
         (taskObj.sub_tasks || []).forEach(sub => {
-          const am = sub.actual_minutes !== undefined && sub.actual_minutes !== 0 ? sub.actual_minutes : sub.estimated_minutes;
+          const am = sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined && (sub as any).actual_minutes !== 0 ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0));
           subLogsToUpsert.push({
             subtask_id: sub.id,
             task_id: taskObj.id,
@@ -2171,8 +2196,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             team_name: sub.team_name || '',
             content: sub.content || sub.name || '',
             assignee: sub.assignee || '',
-            estimated_minutes: sub.estimated_minutes || 0,
-            actual_minutes: am || 0
+            est_time: sub.est_time || (sub as any).estimated_minutes || 0,
+            actual_time: am || 0
           });
         });
 
@@ -2206,7 +2231,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             const logs = [...(t.task_logs || [])];
             const existingLogIndex = logs.findIndex((l: any) => l.todo_date === targetTodoDate);
             const calculatedActual = originTaskObj.sub_tasks?.reduce(
-              (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_minutes) || s.estimated_minutes || 0) : (s.estimated_minutes || 0)),
+              (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_time) || Number((s as any).actual_minutes) || s.est_time || (s as any).estimated_minutes || 0) : (s.est_time || (s as any).estimated_minutes || 0)),
               0
             ) || originTaskObj.est_time || 0;
 
@@ -2222,7 +2247,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               deadline_days: originTaskObj.deadline_days || '',
               task_type: originTaskObj.task_type || 'DAILY',
               est_time: originTaskObj.est_time || 0,
-              actual_minutes: calculatedActual
+              actual_time: calculatedActual
             };
             if (existingLogIndex >= 0) {
               logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
@@ -2235,7 +2260,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               const subLogs = [...(subItem.subtask_logs || [])];
               const subLogIndex = subLogs.findIndex((sl: any) => sl.todo_date === targetTodoDate);
               const originSub = originTaskObj.sub_tasks?.find(s => s.id === subItem.id);
-              const am = originSub ? (originSub.actual_minutes !== undefined && originSub.actual_minutes !== 0 ? originSub.actual_minutes : originSub.estimated_minutes) : subItem.estimated_minutes;
+              const am = originSub ? (originSub.actual_time !== undefined && originSub.actual_time !== null ? originSub.actual_time : ((originSub as any).actual_minutes !== undefined && (originSub as any).actual_minutes !== 0 ? (originSub as any).actual_minutes : (originSub.est_time || (originSub as any).estimated_minutes || 0))) : (subItem.est_time || 0);
 
               const subLogPayload = {
                 subtask_id: subItem.id,
@@ -2246,8 +2271,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 completed_by: updaterName,
                 content: subItem.content || subItem.name || '',
                 assignee: subItem.assignee || '',
-                estimated_minutes: subItem.estimated_minutes || 0,
-                actual_minutes: am || 0
+                est_time: subItem.est_time || 0,
+                actual_time: am || 0
               };
               if (subLogIndex >= 0) {
                 subLogs[subLogIndex] = { ...subLogs[subLogIndex], ...subLogPayload };
@@ -2261,7 +2286,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             const nextGlobalSubLogs = [...(t.subtask_logs || [])];
             (originTaskObj.sub_tasks || []).forEach(sub => {
               const slIdx = nextGlobalSubLogs.findIndex(sl => sl.subtask_id === sub.id && sl.todo_date === targetTodoDate);
-              const am = sub.actual_minutes !== undefined && sub.actual_minutes !== 0 ? sub.actual_minutes : sub.estimated_minutes;
+              const am = sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined && (sub as any).actual_minutes !== 0 ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0));
               const payload = {
                 subtask_id: sub.id,
                 task_id: t.id,
@@ -2271,8 +2296,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 completed_by: updaterName,
                 content: sub.content || sub.name || '',
                 assignee: sub.assignee || '',
-                estimated_minutes: sub.estimated_minutes || 0,
-                actual_minutes: am || 0
+                est_time: sub.est_time || 0,
+                actual_time: am || 0
               };
               if (slIdx >= 0) {
                 nextGlobalSubLogs[slIdx] = { ...nextGlobalSubLogs[slIdx], ...payload };
@@ -2333,7 +2358,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     <div className="flex-1 flex flex-col min-h-0 bg-white overflow-x-auto relative font-sans">
       
       {/* 1. Header with Filters of Checklist To-do */}
-      <div className="px-6 py-3 border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-[1350px] w-full select-none">
+      <div className="px-6 h-[54px] border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-[1350px] w-full select-none py-0">
         <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           {/* Search bar */}
           <div className="relative">
@@ -2836,29 +2861,29 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       </div>
 
       {/* 3. Footer Pagination standard matching list mockup */}
-      <div className="px-6 py-3 flex items-center justify-between border-t border-slate-100 bg-white shrink-0 selection:bg-none min-w-[1350px] w-full">
-        <span className="text-xs font-semibold text-slate-400 font-mono">
+      <div className="px-6 h-8 flex items-center justify-between border-t border-slate-100 bg-white shrink-0 selection:bg-none min-w-[1350px] w-full py-0">
+        <span className="text-[11px] font-semibold text-slate-400 font-mono">
           Total: {totalCount} tasks | {totalSubtasksCount} subtasks
         </span>
         
         {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-1.5">
+          <div className="flex items-center justify-center gap-1">
             <button 
               disabled={page === 1} 
               onClick={() => setPage(p => p - 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronLeft size={14} />
+              <ChevronLeft size={12} />
             </button>
-            <div className="flex gap-1.5 mx-2">
+            <div className="flex gap-1 mx-2">
               {getPaginationItems().map((item, idx) => (
                 <button
                   key={idx}
                   onClick={() => typeof item === 'number' && setPage(item)}
                   disabled={typeof item !== 'number'}
-                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-md text-[11px] font-bold transition-all ${
                     page === item 
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-100 cursor-default" 
+                      ? "bg-indigo-600 text-white shadow-sm cursor-default" 
                       : typeof item === 'number'
                         ? "text-slate-500 hover:bg-slate-50 hover:text-slate-700 border border-slate-200/60 bg-white cursor-pointer"
                         : "text-slate-300 cursor-default"
@@ -2871,9 +2896,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             <button 
               disabled={page === totalPages} 
               onClick={() => setPage(p => p + 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronRight size={14} />
+              <ChevronRight size={12} />
             </button>
           </div>
         )}
@@ -3023,8 +3048,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                                 <input 
                                   type="number"
                                   min={0}
-                                  placeholder={String(sub.estimated_minutes || 0)}
-                                  value={sub.actual_minutes !== undefined ? sub.actual_minutes : ''}
+                                  placeholder={String(sub.est_time || 0)}
+                                  value={sub.actual_time !== undefined ? sub.actual_time : ''}
                                   className="w-12 h-6 px-1 text-center bg-slate-50 border border-slate-200 rounded font-medium text-slate-800 focus:outline-none focus:bg-white text-xs font-mono"
                                   onChange={(e) => {
                                     const val = e.target.value;
@@ -3034,7 +3059,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                                       toast.warning('Max actual time for subtask is 10000 minutes');
                                     }
                                     handleUpdateSubtaskValueLocal(sub.id, { 
-                                      actual_minutes: parsedVal 
+                                      actual_time: parsedVal 
                                     });
                                   }}
                                 />
@@ -3051,8 +3076,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                                 handleUpdateSubtaskValueLocal(sub.id, { 
                                   sub_status: nextVal,
                                   // Auto set mins if setting to Done
-                                  ...(nextVal === 'Done' && (sub.actual_minutes === 0 || sub.actual_minutes === undefined) ? { actual_minutes: sub.estimated_minutes } : {}),
-                                  ...(nextVal === 'Skipped' ? { actual_minutes: 0 } : {})
+                                  ...(nextVal === 'Done' && (sub.actual_time === 0 || sub.actual_time === undefined) ? { actual_time: sub.est_time } : {}),
+                                  ...(nextVal === 'Skipped' ? { actual_time: 0 } : {})
                                 });
                               }}
                             >

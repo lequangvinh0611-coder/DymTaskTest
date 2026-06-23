@@ -66,7 +66,7 @@ interface SubTask {
   id: string;
   content: string;
   assignee: string;
-  estimated_minutes: number;
+  est_time: number;
 }
 
 interface TaskVersion {
@@ -355,7 +355,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               id: st.id || st.subtask_id || Math.random().toString(36).substring(2, 9),
               content: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes
+              est_time: st.est_time || st.estimated_minutes || 0
             }))
           : [];
         setSubTasks(initialSubTasks);
@@ -412,7 +412,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               id: Math.random().toString(36).substring(2, 9),
               content: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes
+              est_time: st.est_time || st.estimated_minutes || 0
             }))
           : [];
         setSubTasks(initialClonedSubTasks);
@@ -436,7 +436,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           id: Math.random().toString(36).substring(2, 9),
           content: '',
           assignee: profile?.name || '',
-          estimated_minutes: 60
+          est_time: 60
         }]);
       }
     }
@@ -469,7 +469,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
       id: Math.random().toString(36).substring(2, 9),
       content: '',
       assignee: profile?.name || masterData.assignees[0] || '',
-      estimated_minutes: 60
+      est_time: 60
     };
     setSubTasks([...subTasks, newSub]);
   };
@@ -492,7 +492,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
 
   // Total estimation sum
   const totalEstMinutes = useMemo(() => {
-    return subTasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+    return subTasks.reduce((sum, s) => sum + (Number(s.est_time) || Number((s as any).estimated_minutes) || 0), 0);
   }, [subTasks]);
 
   const assigneeOptions = useMemo(() => {
@@ -543,7 +543,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
       if (!orig) return false;
       return st.content.trim().toLowerCase() === (orig.content || '').trim().toLowerCase() &&
              st.assignee === orig.assignee &&
-             Number(st.estimated_minutes) === Number(orig.estimated_minutes);
+             Number(st.est_time || (st as any).estimated_minutes) === Number(orig.est_time || orig.estimated_minutes);
     });
     if (!isSubtasksEqual) return false;
 
@@ -623,7 +623,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
             id: st.id,
             content: st.content,
             assignee: st.assignee,
-            estimated_minutes: st.estimated_minutes || st.est_time || 0
+            est_time: st.est_time || st.estimated_minutes || 0
           }))
         };
         updatedVersions = [...updatedVersions, oldVersion];
@@ -634,7 +634,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           return templateSubs.map(sf => ({
             ...sf,
             sub_status: 'New' as const,
-            actual_minutes: sf.estimated_minutes
+            actual_time: sf.est_time || (sf as any).estimated_minutes
           }));
         }
 
@@ -647,15 +647,15 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               ...existingSub,
               content: templateSub.content,
               assignee: templateSub.assignee,
-              estimated_minutes: templateSub.estimated_minutes,
+              est_time: templateSub.est_time || (templateSub as any).estimated_minutes,
               sub_status: existingSub.sub_status || 'New',
-              actual_minutes: existingSub.actual_minutes !== undefined ? existingSub.actual_minutes : templateSub.estimated_minutes
+              actual_time: existingSub.actual_time !== undefined && existingSub.actual_time !== null ? existingSub.actual_time : (templateSub.est_time || (templateSub as any).estimated_minutes)
             };
           } else {
             return {
               ...templateSub,
               sub_status: 'New' as const,
-              actual_minutes: templateSub.estimated_minutes
+              actual_time: templateSub.est_time || (templateSub as any).estimated_minutes
             };
           }
         });
@@ -755,7 +755,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           task_type: taskType,
           est_time: totalEstMinutes,
           updated_by: updaterName,
-          actual_time: existingLog ? (existingLog.actual_time !== undefined ? existingLog.actual_time : existingLog.actual_minutes || 0) : 0
+          actual_time: existingLog ? (existingLog.actual_time !== undefined && existingLog.actual_time !== null ? existingLog.actual_time : 0) : 0
         };
 
         // Upsert the task log
@@ -798,13 +798,13 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
             subtask_id: subtaskId,
             todo_date: todayStr,
             content: st.content,
-            assignee: st.assignee,
-            est_time: st.estimated_minutes || st.est_time || 0,
+            assignee: st.content && st.assignee ? st.assignee : '',
+            est_time: st.est_time || st.estimated_minutes || 0,
             team_name: team || '',
             is_completed: matchedLog ? matchedLog.is_completed : false,
             status: matchedLog ? (matchedLog.status || 'NEW') : 'NEW',
             completed_by: matchedLog ? matchedLog.completed_by : null,
-            actual_time: matchedLog ? (matchedLog.actual_time !== undefined ? matchedLog.actual_time : matchedLog.actual_minutes || 0) : 0
+            actual_time: matchedLog ? (matchedLog.actual_time !== undefined && matchedLog.actual_time !== null ? matchedLog.actual_time : 0) : 0
           };
         });
 
@@ -862,7 +862,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               task_id: taskToEdit.id,
               content: st.content,
               assignee: st.assignee,
-              est_time: st.estimated_minutes || st.est_time || 0,
+              est_time: st.est_time || st.estimated_minutes || 0,
               status: 'PENDING',
               team_name: team || ''
             });
@@ -871,7 +871,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               task_id: taskToEdit.id,
               content: st.content,
               assignee: st.assignee,
-              est_time: st.estimated_minutes || st.est_time || 0,
+              est_time: st.est_time || st.estimated_minutes || 0,
               status: 'PENDING',
               team_name: team || ''
             });
@@ -939,7 +939,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           task_id: taskId,
           content: st.content,
           assignee: st.assignee,
-          est_time: st.estimated_minutes || st.est_time || 0,
+          est_time: st.est_time || st.estimated_minutes || 0,
           status: 'PENDING',
           team_name: team || ''
         }));
@@ -1062,7 +1062,8 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         toast.warning('Sub-task assignee cannot be empty.');
         return;
       }
-      if (sub.estimated_minutes !== undefined && sub.estimated_minutes < 0) {
+      const estVal = sub.est_time !== undefined ? sub.est_time : (sub as any).estimated_minutes;
+      if (estVal !== undefined && estVal < 0) {
         toast.warning('Estimated time for the sub-task cannot be negative.');
         return;
       }
@@ -1410,12 +1411,12 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
                         type="number" 
                         min={0}
                         max={10000}
-                        value={sub.estimated_minutes === 0 ? '' : sub.estimated_minutes}
+                        value={(sub.est_time === undefined ? '' : (sub.est_time === 0 ? '' : sub.est_time))}
                         className="w-full h-8 px-2 bg-slate-50 border border-slate-200 rounded-md text-xs font-medium text-slate-700 focus:outline-none focus:bg-white focus:border-indigo-400 font-mono text-center"
                         placeholder="Min"
                         onChange={(e) => {
                           const val = Math.min(10000, Math.max(0, parseInt(e.target.value) || 0));
-                          handleUpdateSubTaskField(sub.id, 'estimated_minutes', val);
+                          handleUpdateSubTaskField(sub.id, 'est_time', val);
                         }}
                       />
                     </div>

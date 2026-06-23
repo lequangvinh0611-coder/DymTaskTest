@@ -22,8 +22,8 @@ interface SubTask {
   id: string;
   name: string;
   assignee?: string;
-  estimated_minutes?: number;
-  actual_minutes?: number;
+  est_time?: number;
+  actual_time?: number;
   sub_status?: 'New' | 'Done' | 'Skipped';
 }
 
@@ -546,7 +546,7 @@ export default function Dashboard() {
           content: st.content,
           name: st.content,
           assignee: st.assignee,
-          estimated_minutes: st.estimated_minutes
+          est_time: st.est_time || st.estimated_minutes
         }));
       }
 
@@ -618,14 +618,14 @@ export default function Dashboard() {
               return {
                 ...s,
                 sub_status: existing ? existing.sub_status : ('New' as const),
-                actual_minutes: existing ? existing.actual_minutes : 0
+                actual_time: existing ? (existing.actual_time !== undefined && existing.actual_time !== null ? existing.actual_time : (existing as any).actual_minutes || 0) : 0
               };
             });
           } else {
             subTasksResolved = completion?.sub_tasks || sub_tasks.map((s: any) => ({
               ...s,
               sub_status: 'New' as const,
-              actual_minutes: 0
+              actual_time: 0
             }));
           }
 
@@ -661,8 +661,8 @@ export default function Dashboard() {
           if (filterPersonnel) {
             const userSubTasks = subTasksResolved.filter((s: any) => s.assignee === filterPersonnel);
             if (userSubTasks.length > 0) {
-              actual_time = userSubTasks.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_minutes || 0) : 0), 0);
-              est_time = userSubTasks.reduce((sum, s: any) => sum + (s.estimated_minutes || 0), 0);
+              actual_time = userSubTasks.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_time || s.actual_minutes || 0) : 0), 0);
+              est_time = userSubTasks.reduce((sum, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0);
             } else {
               const hasInMain = Array.isArray((task as any).assignees) && (task as any).assignees.includes(filterPersonnel);
               if (hasInMain) {
@@ -671,8 +671,8 @@ export default function Dashboard() {
               }
             }
           } else {
-            actual_time = completion?.actual_time || subTasksResolved.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_minutes || 0) : 0), 0) || 0;
-            est_time = subTasksResolved.reduce((sum, s: any) => sum + (s.estimated_minutes || 0), 0) || task.est_time || 0;
+            actual_time = completion?.actual_time || subTasksResolved.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_time || s.actual_minutes || 0) : 0), 0) || 0;
+            est_time = subTasksResolved.reduce((sum, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0) || task.est_time || 0;
           }
 
           const title = activeVersion ? activeVersion.title : task.title;
@@ -759,8 +759,8 @@ export default function Dashboard() {
             if (filterPersonnel) {
               const userSubTasks = subTasksResolved.filter((s: any) => s.assignee === filterPersonnel);
               if (userSubTasks.length > 0) {
-                actual_time = userSubTasks.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_minutes || 0) : 0), 0);
-                est_time = userSubTasks.reduce((sum, s: any) => sum + (s.estimated_minutes || 0), 0);
+                actual_time = userSubTasks.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_time || s.actual_minutes || 0) : 0), 0);
+                est_time = userSubTasks.reduce((sum, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0);
               } else {
                 const hasInMain = Array.isArray((task as any).assignees) && (task as any).assignees.includes(filterPersonnel);
                 if (hasInMain) {
@@ -769,8 +769,8 @@ export default function Dashboard() {
                 }
               }
             } else {
-              actual_time = target.actual_time || subTasksResolved.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_minutes || 0) : 0), 0) || 0;
-              est_time = subTasksResolved.reduce((sum, s: any) => sum + (s.estimated_minutes || 0), 0) || task.est_time || 0;
+              actual_time = target.actual_time || subTasksResolved.reduce((sum, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_time || s.actual_minutes || 0) : 0), 0) || 0;
+              est_time = subTasksResolved.reduce((sum, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0) || task.est_time || 0;
             }
 
             list.push({
@@ -827,7 +827,7 @@ export default function Dashboard() {
             content: st.content,
             name: st.content,
             assignee: st.assignee,
-            estimated_minutes: st.estimated_minutes
+            est_time: st.est_time || st.estimated_minutes
           }));
         }
 
@@ -870,14 +870,14 @@ export default function Dashboard() {
                 return {
                   ...s,
                   sub_status: existing ? existing.sub_status : ('New' as const),
-                  actual_minutes: existing ? existing.actual_minutes : 0
+                  actual_time: existing ? (existing.actual_time !== undefined && existing.actual_time !== null ? existing.actual_time : (existing as any).actual_minutes || 0) : 0
                 };
               });
             } else {
               subTasksResolved = completion?.sub_tasks || sub_tasks.map((s: any) => ({
                 ...s,
                 sub_status: 'New' as const,
-                actual_minutes: 0
+                actual_time: 0
               }));
             }
 
@@ -902,7 +902,7 @@ export default function Dashboard() {
             if (filterPersonnel) {
               const userSub = subTasksResolved.filter((s: any) => s.assignee === filterPersonnel);
               if (userSub.length > 0) {
-                est_time_for_day = userSub.reduce((sum: number, s: any) => sum + (s.estimated_minutes || 0), 0);
+                est_time_for_day = userSub.reduce((sum: number, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0);
               } else {
                 const hasInMain = Array.isArray((task as any).assignees) && (task as any).assignees.includes(filterPersonnel);
                 if (hasInMain) {
@@ -910,7 +910,7 @@ export default function Dashboard() {
                 }
               }
             } else {
-              est_time_for_day = subTasksResolved.reduce((sum: number, s: any) => sum + (s.estimated_minutes || 0), 0) || task.est_time || 0;
+              est_time_for_day = subTasksResolved.reduce((sum: number, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0) || task.est_time || 0;
             }
 
             dayTasks.push({
@@ -967,7 +967,7 @@ export default function Dashboard() {
               if (filterPersonnel) {
                 const userSub = subTasksResolved.filter((s: any) => s.assignee === filterPersonnel);
                 if (userSub.length > 0) {
-                  est_time_for_day = userSub.reduce((sum: number, s: any) => sum + (s.estimated_minutes || 0), 0);
+                  est_time_for_day = userSub.reduce((sum: number, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0);
                 } else {
                   const hasInMain = Array.isArray((task as any).assignees) && (task as any).assignees.includes(filterPersonnel);
                   if (hasInMain) {
@@ -975,7 +975,7 @@ export default function Dashboard() {
                   }
                 }
               } else {
-                est_time_for_day = subTasksResolved.reduce((sum: number, s: any) => sum + (s.estimated_minutes || 0), 0) || task.est_time || 0;
+                est_time_for_day = subTasksResolved.reduce((sum: number, s: any) => sum + (s.est_time || s.estimated_minutes || 0), 0) || task.est_time || 0;
               }
 
               dayTasks.push({
@@ -1032,7 +1032,7 @@ export default function Dashboard() {
     <div className="flex-1 flex flex-col min-h-0 bg-slate-50 overflow-x-auto text-left font-sans">
       
       {/* FILTER HEADER BAR */}
-      <div className="px-6 py-3 border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-max w-full select-none">
+      <div className="px-6 h-[54px] border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-max w-full select-none py-0">
         <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           {/* PERSONNEL SELECT dropdown */}
           <SearchableFilterSelect

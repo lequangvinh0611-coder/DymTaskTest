@@ -47,7 +47,7 @@ interface SubTask {
   id: string;
   content: string;
   assignee: string;
-  estimated_minutes: number;
+  est_time: number;
 }
 
 interface TaskMetadata {
@@ -380,7 +380,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         const clonedSubtasks = (taskToClone.sub_tasks || meta.sub_tasks || taskToClone.subtasks || []).map((sb: any) => ({
           ...sb,
           id: originalTaskId ? sb.id : Math.random().toString(36).substring(2, 9),
-          estimated_minutes: sb.estimated_minutes || sb.est_time || 0
+          est_time: sb.est_time || sb.estimated_minutes || 0
         }));
         setSubTasks(clonedSubtasks);
       } else {
@@ -402,7 +402,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           id: Math.random().toString(36).substring(2, 9),
           content: '',
           assignee: profile?.name || '',
-          estimated_minutes: 60
+          est_time: 60
         }]);
       }
     }
@@ -431,7 +431,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
       id: Math.random().toString(36).substring(2, 9),
       content: '',
       assignee: profile?.name || masterData.assignees[0] || '',
-      estimated_minutes: 60
+      est_time: 60
     };
     setSubTasks([...subTasks, newSub]);
   };
@@ -450,7 +450,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
   };
 
   const totalEstMinutes = useMemo(() => {
-    return subTasks.reduce((sum, s) => sum + (Number(s.estimated_minutes) || 0), 0);
+    return subTasks.reduce((sum, s) => sum + (Number(s.est_time) || Number((s as any).estimated_minutes) || 0), 0);
   }, [subTasks]);
 
   const assigneeOptions = useMemo(() => {
@@ -495,7 +495,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
       if (!orig) return false;
       return st.content.trim().toLowerCase() === orig.content.trim().toLowerCase() &&
              st.assignee === orig.assignee &&
-             Number(st.estimated_minutes) === Number(orig.estimated_minutes);
+             Number(st.est_time || (st as any).estimated_minutes) === Number(orig.est_time || (orig as any).estimated_minutes);
     });
     if (!isSubtasksEqual) return false;
 
@@ -605,7 +605,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         toast.warning('Sub-task assignee cannot be empty.');
         return;
       }
-      if (sub.estimated_minutes !== undefined && sub.estimated_minutes < 0) {
+      const estVal = sub.est_time !== undefined ? sub.est_time : (sub as any).estimated_minutes;
+      if (estVal !== undefined && estVal < 0) {
         toast.warning('Estimated time for the sub-task cannot be negative.');
         return;
       }
@@ -639,7 +640,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           if (
             oSub.content !== nSub.content || 
             oSub.assignee !== nSub.assignee || 
-            oSub.estimated_minutes !== nSub.estimated_minutes
+            (oSub.est_time || (oSub as any).estimated_minutes) !== (nSub.est_time || (nSub as any).estimated_minutes)
           ) {
             isSubtasksChanged = true;
             break;
@@ -727,7 +728,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           return templateSubs.map(sf => ({
             ...sf,
             sub_status: 'New' as const,
-            actual_minutes: sf.estimated_minutes
+            actual_time: sf.est_time || (sf as any).estimated_minutes
           }));
         }
 
@@ -740,15 +741,15 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
               ...existingSub,
               content: templateSub.content,
               assignee: templateSub.assignee,
-              estimated_minutes: templateSub.estimated_minutes,
+              est_time: templateSub.est_time || (templateSub as any).estimated_minutes,
               sub_status: existingSub.sub_status || 'New',
-              actual_minutes: existingSub.actual_minutes !== undefined ? existingSub.actual_minutes : templateSub.estimated_minutes
+              actual_time: existingSub.actual_time !== undefined && existingSub.actual_time !== null ? existingSub.actual_time : (templateSub.est_time || (templateSub as any).estimated_minutes)
             };
           } else {
             return {
               ...templateSub,
               sub_status: 'New' as const,
-              actual_minutes: templateSub.estimated_minutes
+              actual_time: templateSub.est_time || (templateSub as any).estimated_minutes
             };
           }
         });
@@ -835,7 +836,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
             id: sub.id,
             content: sub.content || sub.name || '',
             assignee: sub.assignee || '',
-            estimated_minutes: sub.est_time !== undefined ? sub.est_time : (sub.estimated_minutes || 0)
+            est_time: sub.est_time !== undefined ? sub.est_time : (sub.estimated_minutes || 0)
           }))
         };
 
@@ -1178,12 +1179,12 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
                         type="number" 
                         min={0}
                         max={10000}
-                        value={sub.estimated_minutes === 0 ? '' : sub.estimated_minutes}
+                        value={(sub.est_time === undefined ? '' : (sub.est_time === 0 ? '' : sub.est_time))}
                         className="w-full h-8 px-2 bg-slate-50 border border-slate-200 rounded-md text-xs font-medium text-slate-700 focus:outline-none focus:bg-white focus:border-indigo-400 font-mono text-center"
                         placeholder="Min"
                         onChange={(e) => {
                           const val = Math.min(10000, Math.max(0, parseInt(e.target.value) || 0));
-                          handleUpdateSubTaskField(sub.id, 'estimated_minutes', val);
+                          handleUpdateSubTaskField(sub.id, 'est_time', val);
                         }}
                       />
                     </div>

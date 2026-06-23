@@ -132,7 +132,7 @@ const AuditLog = () => {
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-white shadow-sm overflow-x-auto">
       {/* Header Bar */}
-      <div className="px-6 py-3 border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-max w-full">
+      <div className="px-6 h-[54px] border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-max w-full py-0">
         <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -246,26 +246,26 @@ const AuditLog = () => {
         </table>
       </div>
       
-      <div className="px-6 py-3 border-t border-slate-100 bg-white flex items-center justify-between shrink-0 selection:bg-none">
-         <span className="text-xs font-medium text-slate-400 font-mono min-w-[100px]">Total logs: {totalCount}</span>
-         <div className="flex-1 flex items-center justify-center gap-1.5">
+      <div className="px-6 h-8 border-t border-slate-100 bg-white flex items-center justify-between shrink-0 selection:bg-none py-0">
+         <span className="text-[11px] font-medium text-slate-400 font-mono min-w-[100px]">Total logs: {totalCount}</span>
+         <div className="flex-1 flex items-center justify-center gap-1">
             <button 
               disabled={page === 1} 
               onClick={() => setPage(p => p - 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronLeft size={14} />
+              <ChevronLeft size={12} />
             </button>
-            <div className="flex gap-1.5 mx-2">
+            <div className="flex gap-1 mx-2">
               {getPaginationItems().map((item, idx) => (
                 <button
                   key={idx}
                   onClick={() => typeof item === 'number' && setPage(item)}
                   disabled={typeof item !== 'number'}
                   className={cn(
-                    "w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-all select-none",
+                    "w-6 h-6 flex items-center justify-center rounded-md text-[11px] font-bold transition-all select-none",
                     page === item 
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-100 cursor-default" 
+                      ? "bg-indigo-600 text-white shadow-sm cursor-default" 
                       : typeof item === 'number'
                         ? "text-slate-500 hover:bg-slate-50 hover:text-slate-700 border border-slate-200/60 bg-white cursor-pointer"
                         : "text-slate-300 cursor-default"
@@ -278,9 +278,9 @@ const AuditLog = () => {
             <button 
               disabled={page === totalPages} 
               onClick={() => setPage(p => p + 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronRight size={14} />
+              <ChevronRight size={12} />
             </button>
          </div>
          <div className="min-w-[100px]"></div>

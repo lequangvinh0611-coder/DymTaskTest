@@ -21,7 +21,7 @@ interface SubTask {
   id: string;
   content: string;
   assignee: string;
-  estimated_minutes: number;
+  est_time: number;
 }
 
 // Definition of metadata stored as robust JSON inside standard 'description' column
@@ -292,6 +292,22 @@ const TaskManager: React.FC = () => {
   // Action Menu dropdown state for specific task action buttons
   const [activeMenuTaskId, setActiveMenuTaskId] = useState<string | null>(null);
 
+  // Click outside listener for Action Menu dropdown to auto close
+  useEffect(() => {
+    const handleDocumentClick = (e: MouseEvent) => {
+      if (activeMenuTaskId) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('.action-menu-container')) {
+          setActiveMenuTaskId(null);
+        }
+      }
+    };
+    document.addEventListener('click', handleDocumentClick);
+    return () => {
+      document.removeEventListener('click', handleDocumentClick);
+    };
+  }, [activeMenuTaskId]);
+
   // Pending edit approve_tasks caching lists
   const pendingEditTaskIds = useMemo(() => {
     const ids = new Set<string>();
@@ -378,7 +394,7 @@ const TaskManager: React.FC = () => {
               id: st.id,
               content: st.content || '',
               assignee: st.assignee || '',
-              estimated_minutes: st.estimated_minutes || 0
+              est_time: st.est_time || st.estimated_minutes || 0
             }))
           : [],
         last_updated_by: '',
@@ -635,7 +651,7 @@ const TaskManager: React.FC = () => {
       id: st.id,
       content: st.content,
       assignee: st.assignee,
-      estimated_minutes: st.estimated_minutes
+      est_time: st.est_time || st.estimated_minutes
     }));
     meta.sub_tasks = mappedSubtasks;
     
@@ -668,7 +684,7 @@ const TaskManager: React.FC = () => {
       id: st.id,
       content: st.content,
       assignee: st.assignee,
-      estimated_minutes: st.estimated_minutes
+      est_time: st.est_time || st.estimated_minutes
     }));
     meta.sub_tasks = mappedSubtasks;
 
@@ -775,7 +791,7 @@ const TaskManager: React.FC = () => {
       
       {/* 1. Header Filter & Actions Controls */}
       {/* 1. Actions Header toolbar */}
-      <div className="px-6 py-3 border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-[1350px] w-full mb-0">
+      <div className="px-6 h-[54px] border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-[1350px] w-full mb-0 py-0">
         <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           {/* Search task */}
           <div className="relative">
@@ -1056,7 +1072,7 @@ const TaskManager: React.FC = () => {
                   </td>
 
                   {/* Actions dropdown button */}
-                  <td className="px-3 py-1.5 text-center relative" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-3 py-1.5 text-center relative action-menu-container" onClick={(e) => e.stopPropagation()}>
                     <button 
                       onClick={() => setActiveMenuTaskId(activeMenuTaskId === task.id ? null : task.id)}
                       className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
@@ -1197,29 +1213,29 @@ const TaskManager: React.FC = () => {
       </div>
 
       {/* 3. Footer Statistics and Client-side Page Navigator */}
-      <div className="px-6 py-3 flex items-center justify-between border-t border-slate-100 bg-white shrink-0 selection:bg-none min-w-[1350px] w-full">
-        <span className="text-xs font-semibold text-slate-400 font-mono">
+      <div className="px-6 h-8 flex items-center justify-between border-t border-slate-100 bg-white shrink-0 selection:bg-none min-w-[1350px] w-full py-0">
+        <span className="text-[11px] font-semibold text-slate-400 font-mono">
           Total: {totalCount} templates | {totalSubtasksCount} subtasks
         </span>
         
         {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-1.5">
+          <div className="flex items-center justify-center gap-1">
             <button 
               disabled={page === 1} 
               onClick={() => setPage(p => p - 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronLeft size={14} />
+              <ChevronLeft size={12} />
             </button>
-            <div className="flex gap-1.5 mx-2">
+            <div className="flex gap-1 mx-2">
               {getPaginationItems().map((item, idx) => (
                 <button
                   key={idx}
                   onClick={() => typeof item === 'number' && setPage(item)}
                   disabled={typeof item !== 'number'}
-                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-md text-[11px] font-bold transition-all ${
                     page === item 
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-100 cursor-default" 
+                      ? "bg-indigo-600 text-white shadow-sm cursor-default" 
                       : typeof item === 'number'
                         ? "text-slate-500 hover:bg-slate-50 hover:text-slate-700 border border-slate-200/60 bg-white cursor-pointer"
                         : "text-slate-300 cursor-default"
@@ -1232,9 +1248,9 @@ const TaskManager: React.FC = () => {
             <button 
               disabled={page === totalPages} 
               onClick={() => setPage(p => p + 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronRight size={14} />
+              <ChevronRight size={12} />
             </button>
           </div>
         )}
@@ -1388,7 +1404,7 @@ const TaskManager: React.FC = () => {
                         <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-50">
                           <div className="flex-1 bg-slate-50 border border-slate-100 rounded px-2 py-1 text-xs text-slate-400 flex items-center justify-between font-mono">
                             <span>Estimated</span>
-                            <span className="text-slate-700 font-medium">{sub.estimated_minutes} min</span>
+                            <span className="text-slate-700 font-medium">{sub.est_time || sub.estimated_minutes} min</span>
                           </div>
                           
                           <div className="border border-slate-100 rounded px-2 py-1 text-xs text-slate-400 shrink-0 font-mono text-center">
@@ -1502,7 +1518,7 @@ const TaskManager: React.FC = () => {
                                           </div>
                                           <div className="text-[10px] text-slate-400 font-mono flex justify-between pt-0.5 border-t border-slate-100/50">
                                             <span>Est duration:</span>
-                                            <span className="font-semibold text-slate-650">{st.estimated_minutes} min</span>
+                                            <span className="font-semibold text-slate-650">{st.est_time || st.estimated_minutes} min</span>
                                           </div>
                                         </div>
                                       ))}

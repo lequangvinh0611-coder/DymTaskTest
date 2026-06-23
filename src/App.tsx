@@ -242,19 +242,19 @@ export default function App() {
       <Sidebar />
       
       <main className="flex-1 flex flex-col min-w-0 h-full p-2 bg-slate-50/50">
-        <header className="flex items-center justify-between mb-1.5 shrink-0 px-3 mt-1">
+        <header className="h-[26px] flex items-center justify-between mb-1.5 shrink-0 px-3 mt-1">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setSidebarOpen(!isSidebarOpen)}
-              className="md:hidden p-1.5 mr-1 text-slate-500 hover:text-indigo-600 rounded-lg hover:bg-slate-200/60 focus:outline-none transition-colors cursor-pointer"
+              className="md:hidden p-1 mr-1 text-slate-500 hover:text-indigo-600 rounded-lg hover:bg-slate-200/60 focus:outline-none transition-colors cursor-pointer"
               aria-label="Toggle Sidebar"
               title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             >
-              <Menu size={18} className={cn("transition-transform duration-200", !isSidebarOpen && "rotate-90")} />
+              <Menu size={16} className={cn("transition-transform duration-200", !isSidebarOpen && "rotate-90")} />
             </button>
             <h1 
-              className="text-sm font-semibold text-slate-800 cursor-pointer hover:text-indigo-600 transition-all"
+              className="text-xs uppercase tracking-wider font-bold text-slate-800 cursor-pointer hover:text-indigo-600 transition-all font-sans"
               onClick={() => useAppStore.getState().triggerRefresh()}
               title="Click to refresh data"
             >
@@ -265,9 +265,9 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsGuideOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-150 rounded-lg text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-all shadow-sm cursor-pointer select-none"
+              className="flex items-center gap-1 px-2 h-6 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-150 rounded text-[10px] font-bold text-indigo-600 hover:text-indigo-700 transition-all shadow-sm cursor-pointer select-none"
             >
-              <HelpCircle size={13} className="text-indigo-500 animate-pulse shrink-0" />
+              <HelpCircle size={11} className="text-indigo-500 animate-pulse shrink-0" />
               <span>User Guide</span>
             </button>
           </div>

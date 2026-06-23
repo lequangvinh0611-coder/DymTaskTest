@@ -52,8 +52,8 @@ export interface Subtask {
   name?: string;                     // Giữ name? cho tương thích ngược với UI
   content: string;                    // Cột mới template con subtasks
   assignee: string;
-  estimated_minutes?: number;
-  actual_minutes?: number;            // Thêm actual_minutes
+  est_time?: number;                 // Lưu số phút dự kiến
+  actual_time?: number;              // Lưu số phút thực tế
   status?: 'NEW' | 'IN_PROGRESS' | 'DONE'; // Thêm status thay vì chỉ is_completed
   is_completed?: boolean;
   subtask_logs?: SubtaskLog[];        // Chứa dữ liệu nhật ký subtask ngày
@@ -73,8 +73,8 @@ export interface Task {
   // Các field thời gian mới theo Phase 2 (Migration 1)
   deadline_time?: string | null;     // VD: "08:30" hoặc "17:00:00"
   deadline_days?: string | null;     // Cột độc lập chứa ngày lặp lại dưới dạng TEXT
-  estimated_minutes: number;         // Chuyển sang lưu số phút
-  actual_minutes: number;            // Chuyển sang lưu số phút
+  est_time: number;                  // Lưu số phút dự kiến
+  actual_time: number;               // Lưu số phút thực tế
 
   status: 'NEW' | 'IN_PROGRESS' | 'DONE' | 'SUBMITTED';
   subtasks: Subtask[];
@@ -355,7 +355,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           id: st.id,
           content: st.content,
           assignee: st.assignee,
-          estimated_minutes: st.est_time || st.estimated_minutes || 0,
           est_time: st.est_time || st.estimated_minutes || 0
         }));
         const meta = {
@@ -401,17 +400,15 @@ export const useAppStore = create<AppState>((set, get) => ({
                 sub_status = 'Skipped';
               }
             }
-            const matchedEst = stLog ? (stLog.est_time !== undefined ? stLog.est_time : stLog.estimated_minutes) : undefined;
-            const matchedAct = stLog ? (stLog.actual_time !== undefined ? stLog.actual_time : stLog.actual_minutes) : undefined;
+            const matchedEst = stLog ? (stLog.est_time !== undefined && stLog.est_time !== null ? stLog.est_time : stLog.estimated_minutes) : undefined;
+            const matchedAct = stLog ? (stLog.actual_time !== undefined && stLog.actual_time !== null ? stLog.actual_time : stLog.actual_minutes) : undefined;
 
             return {
               id: st.id,
               content: st.content,
               name: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.est_time || st.estimated_minutes || 0,
               est_time: st.est_time || st.estimated_minutes || 0,
-              actual_minutes: matchedAct || 0,
               actual_time: matchedAct || 0,
               sub_status
             };
@@ -553,13 +550,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           const matchedSubtaskLogs = subtaskLogsData.filter((log: any) => log.subtask_id === subtask.id);
           const mappedLogs = matchedSubtaskLogs.map((log: any) => ({
             ...log,
-            estimated_minutes: log.est_time !== undefined ? log.est_time : log.estimated_minutes,
-            actual_minutes: log.actual_time !== undefined ? log.actual_time : log.actual_minutes
+            est_time: log.est_time !== undefined && log.est_time !== null ? log.est_time : log.estimated_minutes,
+            actual_time: log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : log.actual_minutes
           }));
           return {
             ...subtask,
-            estimated_minutes: subtask.est_time !== undefined ? subtask.est_time : subtask.estimated_minutes,
-            est_time: subtask.est_time !== undefined ? subtask.est_time : subtask.estimated_minutes,
+            est_time: subtask.est_time !== undefined && subtask.est_time !== null ? subtask.est_time : subtask.estimated_minutes,
             name: subtask.name || subtask.content, // Backward compatibility with UI name property
             subtask_logs: mappedLogs
           };

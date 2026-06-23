@@ -17,7 +17,7 @@ interface SubTask {
   id: string;
   content: string;
   assignee: string;
-  estimated_minutes: number;
+  est_time: number;
 }
 
 interface TaskMetadata {
@@ -535,7 +535,7 @@ const ApproveTask: React.FC = () => {
 
       const isEditRequest = !!request.meta?.original_task_id;
       const calculated_request_est_time = (request.meta.sub_tasks || []).reduce(
-        (sum: number, s: any) => sum + (Number(s.estimated_minutes) || Number(s.est_time) || 0), 
+        (sum: number, s: any) => sum + (Number(s.est_time) || 0), 
         0
       );
       const final_est_time = request.est_time || calculated_request_est_time;
@@ -583,7 +583,7 @@ const ApproveTask: React.FC = () => {
             task_type: request.task_type,
             est_time: final_est_time,
             updated_by: updaterName,
-            actual_time: existingLog ? (existingLog.actual_time !== undefined ? existingLog.actual_time : existingLog.actual_minutes || 0) : 0
+            actual_time: existingLog ? (existingLog.actual_time !== undefined && existingLog.actual_time !== null ? existingLog.actual_time : 0) : 0
           };
 
           // Upsert the task log
@@ -627,12 +627,12 @@ const ApproveTask: React.FC = () => {
               todo_date: todayStr,
               content: st.content,
               assignee: st.assignee,
-              est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
+              est_time: Number(st.est_time || st.estimated_minutes || 0),
               team_name: request.meta.team_name || '',
               is_completed: matchedLog ? matchedLog.is_completed : false,
               status: matchedLog ? (matchedLog.status || 'NEW') : 'NEW',
               completed_by: matchedLog ? matchedLog.completed_by : null,
-              actual_time: matchedLog ? (matchedLog.actual_time !== undefined ? matchedLog.actual_time : matchedLog.actual_minutes || 0) : 0
+              actual_time: matchedLog ? (matchedLog.actual_time !== undefined && matchedLog.actual_time !== null ? matchedLog.actual_time : 0) : 0
             };
           });
 
@@ -668,7 +668,7 @@ const ApproveTask: React.FC = () => {
               return templateSubs.map(sf => ({
                 ...sf,
                 sub_status: 'New',
-                actual_minutes: sf.estimated_minutes
+                actual_time: sf.est_time || sf.estimated_minutes
               }));
             }
 
@@ -681,15 +681,15 @@ const ApproveTask: React.FC = () => {
                   ...existingSub,
                   content: templateSub.content,
                   assignee: templateSub.assignee,
-                  estimated_minutes: templateSub.estimated_minutes,
+                  est_time: templateSub.est_time || templateSub.estimated_minutes,
                   sub_status: existingSub.sub_status || 'New',
-                  actual_minutes: existingSub.actual_minutes !== undefined ? existingSub.actual_minutes : templateSub.estimated_minutes
+                  actual_time: existingSub.actual_time !== undefined && existingSub.actual_time !== null ? existingSub.actual_time : (templateSub.est_time || templateSub.estimated_minutes)
                 };
               } else {
                 return {
                   ...templateSub,
                   sub_status: 'New',
-                  actual_minutes: templateSub.estimated_minutes
+                  actual_time: templateSub.est_time || templateSub.estimated_minutes
                 };
               }
             });
@@ -744,12 +744,12 @@ const ApproveTask: React.FC = () => {
             deadline_days: Array.isArray(originalTask.deadline_days)
               ? originalTask.deadline_days.join(', ')
               : String(originalTask.deadline_days || latestMeta.deadline_days || ''),
-            est_time: Number(originalTask.estimated_minutes) || Number(originalTask.est_time) || 0,
+            est_time: Number(originalTask.est_time || originalTask.estimated_minutes || 0),
             sub_tasks: (originalSubs || latestMeta.sub_tasks || []).map((st: any) => ({
               id: st.id,
               content: st.content,
               assignee: st.assignee,
-              estimated_minutes: st.estimated_minutes
+              est_time: st.est_time || st.estimated_minutes
             }))
           };
           updatedVersions = [...updatedVersions, oldVersion];
@@ -772,7 +772,6 @@ const ApproveTask: React.FC = () => {
               note: (request.meta.note || '').trim(),
               task_type: request.task_type,
               est_time: final_est_time,
-              estimated_minutes: final_est_time,
               project_name: request.meta.project_name || '',
               tag_name: request.meta.tag_name || '',
               deadline_time: finalDeadlineTime,
@@ -810,8 +809,7 @@ const ApproveTask: React.FC = () => {
                 id: matchedDbSub.id,
                 content: st.content,
                 assignee: st.assignee,
-                est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
-                estimated_minutes: Number(st.estimated_minutes) || Number(st.est_time) || 0,
+                est_time: Number(st.est_time || st.estimated_minutes || 0),
                 team_name: request.meta.team_name || ''
               });
               seenDbIds.add(matchedDbSub.id);
@@ -820,8 +818,7 @@ const ApproveTask: React.FC = () => {
                 task_id: request.meta.original_task_id,
                 content: st.content,
                 assignee: st.assignee,
-                est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
-                estimated_minutes: Number(st.estimated_minutes) || Number(st.est_time) || 0,
+                est_time: Number(st.est_time || st.estimated_minutes || 0),
                 status: 'PENDING',
                 team_name: request.meta.team_name || ''
               });
@@ -876,7 +873,6 @@ const ApproveTask: React.FC = () => {
             status: 'ON',
             is_active: true,
             est_time: final_est_time,
-            estimated_minutes: final_est_time,
             project_name: request.meta.project_name || '',
             tag_name: request.meta.tag_name || '',
             deadline_time: finalDeadlineTime,
@@ -896,8 +892,7 @@ const ApproveTask: React.FC = () => {
           task_id: newTaskId,
           content: st.content,
           assignee: st.assignee,
-          est_time: Number(st.estimated_minutes) || Number(st.est_time) || 0,
-          estimated_minutes: Number(st.estimated_minutes) || Number(st.est_time) || 0,
+          est_time: Number(st.est_time || st.estimated_minutes || 0),
           status: 'PENDING',
           team_name: request.meta.team_name || ''
         }));
@@ -1152,11 +1147,11 @@ const ApproveTask: React.FC = () => {
       id: string;
       content: string;
       assignee: string;
-      estimated_minutes: number;
+      est_time: number;
       status: 'unchanged' | 'modified' | 'deleted' | 'added';
       oldContent?: string;
       oldAssignee?: string;
-      oldEstimatedMinutes?: number;
+      oldEstTime?: number;
       hasContentChanged?: boolean;
       hasAssigneeChanged?: boolean;
       hasMinutesChanged?: boolean;
@@ -1171,23 +1166,23 @@ const ApproveTask: React.FC = () => {
           id: oldSub.id,
           content: oldSub.content,
           assignee: oldSub.assignee,
-          estimated_minutes: oldSub.estimated_minutes,
+          est_time: oldSub.est_time || oldSub.estimated_minutes,
           status: 'deleted',
         });
       } else {
         const hasContentChanged = newSub.content !== oldSub.content;
         const hasAssigneeChanged = newSub.assignee !== oldSub.assignee;
-        const hasMinutesChanged = Number(newSub.estimated_minutes) !== Number(oldSub.estimated_minutes);
+        const hasMinutesChanged = Number(newSub.est_time || newSub.estimated_minutes) !== Number(oldSub.est_time || oldSub.estimated_minutes);
 
         result.push({
           id: newSub.id,
           content: newSub.content,
           assignee: newSub.assignee,
-          estimated_minutes: newSub.estimated_minutes,
+          est_time: newSub.est_time || newSub.estimated_minutes,
           status: (hasContentChanged || hasAssigneeChanged || hasMinutesChanged) ? 'modified' : 'unchanged',
           oldContent: oldSub.content,
           oldAssignee: oldSub.assignee,
-          oldEstimatedMinutes: oldSub.estimated_minutes,
+          oldEstTime: oldSub.est_time || oldSub.estimated_minutes,
           hasContentChanged,
           hasAssigneeChanged,
           hasMinutesChanged,
@@ -1202,7 +1197,7 @@ const ApproveTask: React.FC = () => {
           id: newSub.id,
           content: newSub.content,
           assignee: newSub.assignee,
-          estimated_minutes: newSub.estimated_minutes,
+          est_time: newSub.est_time || newSub.estimated_minutes,
           status: 'added',
         });
       }
@@ -1361,11 +1356,11 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         deadline_days: Array.isArray(originalTask.deadline_days)
           ? originalTask.deadline_days.join(', ')
           : String(originalTask.deadline_days || ''),
-        est_time: Number(originalTask.estimated_minutes) || Number(originalTask.est_time) || 0,
+        est_time: Number(originalTask.est_time || originalTask.estimated_minutes || 0),
         sub_tasks: (originalTask.subtasks || []).map((st: any) => ({
           content: st.content,
           assignee: st.assignee,
-          estimated_minutes: st.estimated_minutes !== undefined ? st.estimated_minutes : (st.est_time !== undefined ? st.est_time : 0)
+          est_time: st.est_time !== undefined && st.est_time !== null ? st.est_time : (st.estimated_minutes !== undefined ? st.estimated_minutes : 0)
         }))
       };
       // Prevent duplicating current live version if it is already snapshotted as the latest entry in original history versions
@@ -1388,7 +1383,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
     <div className="flex-1 flex flex-col min-h-0 bg-white overflow-x-auto relative font-sans">
       
       {/* 1. Header Toolbar Filters */}
-      <div className="px-6 py-3 border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-[1350px] w-full mb-0">
+      <div className="px-6 h-[54px] border-b border-slate-100 bg-white shrink-0 flex items-center justify-between gap-4 flex-nowrap overflow-visible relative z-[40] min-w-[1350px] w-full mb-0 py-0">
         <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           
           {/* Search bar */}
@@ -1716,30 +1711,30 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         )}
       </div>
 
-      {/* 3. Footer Stats */}
-      <div className="px-6 py-3 flex items-center justify-between border-t border-slate-100 bg-white shrink-0 selection:bg-none min-w-[1350px] w-full">
-        <span className="text-xs font-semibold text-slate-400 font-mono">
+      {/* 4. Footer Stats */}
+      <div className="px-6 h-8 flex items-center justify-between border-t border-slate-100 bg-white shrink-0 selection:bg-none min-w-[1350px] w-full py-0">
+        <span className="text-[11px] font-semibold text-slate-400 font-mono">
           Total: {totalCount} approval records | {totalSubtasksCount} subtasks
         </span>
         
         {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-1.5">
+          <div className="flex items-center justify-center gap-1">
             <button 
               disabled={page === 1} 
               onClick={() => setPage(p => p - 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronLeft size={14} />
+              <ChevronLeft size={12} />
             </button>
-            <div className="flex gap-1.5 mx-2">
+            <div className="flex gap-1 mx-2">
               {getPaginationItems().map((item, idx) => (
                 <button
                   key={idx}
                   onClick={() => typeof item === 'number' && setPage(item)}
                   disabled={typeof item !== 'number'}
-                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${
+                  className={`w-6 h-6 flex items-center justify-center rounded-md text-[11px] font-bold transition-all ${
                     page === item 
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-100 cursor-default" 
+                      ? "bg-indigo-600 text-white shadow-sm cursor-default" 
                       : typeof item === 'number'
                         ? "text-slate-500 hover:bg-slate-50 hover:text-slate-700 border border-slate-200/60 bg-white cursor-pointer"
                         : "text-slate-350 cursor-default"
@@ -1752,9 +1747,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
             <button 
               disabled={page === totalPages} 
               onClick={() => setPage(p => p + 1)} 
-              className="px-2.5 py-1.5 text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
+              className="w-6 h-6 flex items-center justify-center text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-white transition-all cursor-pointer"
             >
-              <ChevronRight size={14} />
+              <ChevronRight size={12} />
             </button>
           </div>
         )}
@@ -1974,7 +1969,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                               <span 
                                 className={minutesClass}
                               >
-                                {sub.estimated_minutes} min
+                                {sub.est_time || sub.estimated_minutes} min
                               </span>
                             </div>
                             
@@ -2090,7 +2085,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                                           </div>
                                           <div className="text-[10px] text-slate-400 font-mono flex justify-between pt-0.5 border-t border-slate-100/50">
                                             <span>Est duration:</span>
-                                            <span className="font-semibold text-slate-650">{st.estimated_minutes} min</span>
+                                            <span className="font-semibold text-slate-650">{st.est_time || st.estimated_minutes} min</span>
                                           </div>
                                         </div>
                                       ))}
