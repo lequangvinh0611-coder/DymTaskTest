@@ -3,7 +3,7 @@ import {
   Search, RotateCcw, Plus, Trash2, Power, Clock, ChevronLeft, ChevronRight, 
   Edit2, MoreHorizontal, X, AlertCircle, Loader2, Check, Ban, History, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { supabase, trackLocalMutation } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import CreateApproveTaskModal from '../components/CreateApproveTaskModal';
 import { FilterSelect } from '../components/ui/FilterSelect';
@@ -424,8 +424,7 @@ const ApproveTask: React.FC = () => {
     fetchMetadata,
     approveTasks,
     fetchApproveTasks,
-    fetchTasks,
-    tasks
+    fetchTasks
   } = useAppStore();
 
   const { profile } = useAuthStore();
@@ -491,8 +490,8 @@ const ApproveTask: React.FC = () => {
   const [page, setPage] = useState(1);
   const pageSize = 15;
 
-  const loadRequests = async (isSilent = false) => {
-    if (!isSilent) setLoading(true);
+  const loadRequests = async () => {
+    setLoading(true);
     try {
       await fetchApproveTasks(true);
       setTableMissing(false);
@@ -516,16 +515,12 @@ const ApproveTask: React.FC = () => {
         toast.error('Failed to load approve tasks creation requests.');
       }
     } finally {
-      if (!isSilent) setLoading(false);
+      setLoading(false);
     }
   };
 
   const getOriginalTaskDisplayId = (originalTaskId: string) => {
     if (!originalTaskId) return '';
-    const task = tasks.find(t => t.id === originalTaskId);
-    if (task && task.display_id !== undefined && task.display_id !== null) {
-      return String(task.display_id).padStart(6, '0');
-    }
     const displayId = originalTasksMap[originalTaskId];
     if (displayId !== undefined && displayId !== null) {
       return String(displayId).padStart(6, '0');
@@ -658,10 +653,6 @@ const ApproveTask: React.FC = () => {
   const executeAcceptRequest = async (request: any, scope: 'FUTURE' | 'TODAY_ONLY') => {
     setAcceptingId(request.id);
     try {
-      trackLocalMutation(request.id);
-      if (request.meta?.task_template_id) {
-        trackLocalMutation(request.meta.task_template_id);
-      }
       let mergedCompletions = request.meta.completions || {};
       let mergedOnetimeTargets = request.meta.onetime_targets || [];
       let updatedVersions = request.meta.versions || [];
@@ -1108,7 +1099,7 @@ const ApproveTask: React.FC = () => {
       setOpenedDrawerTask(null);
       // 5. Synchronize App store
       await fetchTasks(true);
-      await loadRequests(true);
+      await loadRequests();
 
     } catch (err: any) {
       console.error('[ApproveTask] Error accepting request:', err);
@@ -1170,7 +1161,6 @@ const ApproveTask: React.FC = () => {
 
     setRejectingId(rejectDialogTask.id);
     try {
-      trackLocalMutation(rejectDialogTask.id);
       const { error } = await supabase
         .from('approve_tasks')
         .update({ status: 'REJECTED', reject_reason: reason })
@@ -1191,7 +1181,7 @@ const ApproveTask: React.FC = () => {
       setIsRejectDialogOpen(false);
       setRejectDialogTask(null);
       setRejectReasonInput('');
-      loadRequests(true);
+      loadRequests();
     } catch (err: any) {
       console.error('[ApproveTask] Error rejecting:', err);
       toast.error(`Database Error: ${err.message || 'Could not reject request'}`);
@@ -1212,7 +1202,6 @@ const ApproveTask: React.FC = () => {
       onConfirm: async () => {
         setDeletingId(id);
         try {
-          trackLocalMutation(id);
           const { error } = await supabase
             .from('approve_tasks')
             .delete()
@@ -1222,7 +1211,7 @@ const ApproveTask: React.FC = () => {
 
           toast.success('Task request deleted successfully.');
           setOpenedDrawerTask(null);
-          loadRequests(true);
+          loadRequests();
         } catch (err: any) {
           console.error('[ApproveTask] Error deleting:', err);
           toast.error(`Database Error: ${err.message || 'Could not delete request record'}`);
@@ -2382,7 +2371,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSuccess={() => {
-          loadRequests(true);
+          loadRequests();
           if (openedDrawerTask) {
             setOpenedDrawerTask(null);
           }
