@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppStore } from './types';
 import { useAuthStore } from './store/authStore';
-import { supabase } from './lib/supabase';
+import { supabase, isLocalMutation } from './lib/supabase';
 import Sidebar from './components/Sidebar';
 import TaskList from './components/TaskList';
 import AuditLog from './components/AuditLog';
@@ -107,6 +107,9 @@ export default function App() {
         const channel = supabase.channel('global_app_realtime_sync')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload: any) => {
             const taskId = payload.new?.id || payload.old?.id;
+            if (taskId && isLocalMutation(taskId)) {
+              return;
+            }
             triggerTaskUpdate(taskId);
             
             // On hard structural modifications (INSERT / DELETE), refresh full templates & schedule in background
@@ -117,6 +120,9 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, (payload: any) => {
             const taskId = payload.new?.task_id || payload.old?.task_id || getTaskIdByNestedId(payload.old?.id || payload.new?.id, 'subtask');
             if (taskId) {
+              if (isLocalMutation(taskId)) {
+                return;
+              }
               triggerTaskUpdate(taskId);
             }
             if (payload.eventType === 'INSERT' || payload.eventType === 'DELETE') {
@@ -126,33 +132,31 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, (payload: any) => {
             const taskId = payload.new?.task_id || payload.old?.task_id || getTaskIdByNestedId(payload.old?.id || payload.new?.id, 'task_log');
             if (taskId) {
+              if (isLocalMutation(taskId)) {
+                return;
+              }
               triggerTaskUpdate(taskId);
             }
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, (payload: any) => {
             const taskId = payload.new?.task_id || payload.old?.task_id || getTaskIdByNestedId(payload.old?.id || payload.new?.id, 'subtask_log');
             if (taskId) {
+              if (isLocalMutation(taskId)) {
+                return;
+              }
               triggerTaskUpdate(taskId);
             }
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
-            debouncedFetchMetadata();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
-            debouncedFetchMetadata();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-            debouncedFetchMetadata();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'tags' }, () => {
-            debouncedFetchMetadata();
-          })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'approve_tasks' }, () => {
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'approve_tasks' }, (payload: any) => {
+            const requestId = payload.new?.id || payload.old?.id;
+            if (requestId && isLocalMutation(requestId)) {
+              return;
+            }
             debouncedFetchApproveTasks();
           })
           .subscribe((status, err) => {
             if (status === 'SUBSCRIBED') {
-              console.log('[Realtime] Successfully subscribed to global sync channel');
+              console.log('[Realtime] Successfully subscribed to global sync channel (optimized with self-filtering)');
             } else if (status === 'CHANNEL_ERROR') {
               console.error('[Realtime] Channel error occurred:', err);
             } else if (status === 'TIMED_OUT') {

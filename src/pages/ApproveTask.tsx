@@ -3,7 +3,7 @@ import {
   Search, RotateCcw, Plus, Trash2, Power, Clock, ChevronLeft, ChevronRight, 
   Edit2, MoreHorizontal, X, AlertCircle, Loader2, Check, Ban, History, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, trackLocalMutation } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import CreateApproveTaskModal from '../components/CreateApproveTaskModal';
 import { FilterSelect } from '../components/ui/FilterSelect';
@@ -658,6 +658,10 @@ const ApproveTask: React.FC = () => {
   const executeAcceptRequest = async (request: any, scope: 'FUTURE' | 'TODAY_ONLY') => {
     setAcceptingId(request.id);
     try {
+      trackLocalMutation(request.id);
+      if (request.meta?.task_template_id) {
+        trackLocalMutation(request.meta.task_template_id);
+      }
       let mergedCompletions = request.meta.completions || {};
       let mergedOnetimeTargets = request.meta.onetime_targets || [];
       let updatedVersions = request.meta.versions || [];
@@ -1166,6 +1170,7 @@ const ApproveTask: React.FC = () => {
 
     setRejectingId(rejectDialogTask.id);
     try {
+      trackLocalMutation(rejectDialogTask.id);
       const { error } = await supabase
         .from('approve_tasks')
         .update({ status: 'REJECTED', reject_reason: reason })
@@ -1207,6 +1212,7 @@ const ApproveTask: React.FC = () => {
       onConfirm: async () => {
         setDeletingId(id);
         try {
+          trackLocalMutation(id);
           const { error } = await supabase
             .from('approve_tasks')
             .delete()

@@ -3,7 +3,7 @@ import {
   Search, RotateCcw, Clock, Check, AlertCircle, ChevronLeft, ChevronRight, 
   X, Calendar, Download, RefreshCw, Layers, CheckSquare, Square, Loader2
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, trackLocalMutation } from '../lib/supabase';
 import { DateRangePicker } from './ui/DateRangePicker';
 import { FilterSelect } from './ui/FilterSelect';
 import { SearchableFilterSelect } from './ui/SearchableFilterSelect';
@@ -1182,6 +1182,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   // Submit task from actions button, preserving Skipped states
   const handleDirectSubmit = async (task: VirtualTask) => {
     try {
+      trackLocalMutation(task.id);
       const updaterName = activeUser?.name || profile?.name || currentUser?.email || 'System';
 
       const calculatedActual = (task.sub_tasks || []).reduce(
@@ -1333,6 +1334,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     }
 
     try {
+      trackLocalMutation(task.id);
       // 1. Update task log to NEW and actual_time to 0
       const { error: logErr } = await supabase
         .from('task_logs')
@@ -1415,6 +1417,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   // Skip task checklist representation completely
   const handleSkipTask = async (task: VirtualTask) => {
     try {
+      trackLocalMutation(task.id);
       const updaterName = activeUser?.name || profile?.name || currentUser?.email || 'System';
       
       // 1. Upsert down to task_logs
@@ -1603,6 +1606,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   // Save accumulated sub-task changes to Supabase upon drawer closing
   const saveOpenedTaskChanges = async (taskToSave: VirtualTask) => {
     try {
+      trackLocalMutation(taskToSave.id);
       const completedBy = activeUser?.name || activeUser?.email || 'Unknown';
 
       // Save subtask logs to DB in a single batch upsert to ensure perfect synchronization
@@ -1995,6 +1999,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         const taskObj = virtualTasks.find(t => t.virtual_id === virtualId);
         if (!taskObj) continue;
 
+        trackLocalMutation(taskObj.id);
         logsToUpsert.push({
           task_id: taskObj.id,
           todo_date: taskObj.todo_date,
@@ -2179,6 +2184,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         const taskObj = virtualTasks.find(t => t.virtual_id === virtualId);
         if (!taskObj) continue;
 
+        trackLocalMutation(taskObj.id);
         const calculatedActual = taskObj.sub_tasks?.reduce(
           (sum, s) => sum + (s.sub_status === 'Done' ? (Number(s.actual_time) || Number((s as any).actual_minutes) || s.est_time || (s as any).estimated_minutes || 0) : (s.est_time || (s as any).estimated_minutes || 0)),
           0
