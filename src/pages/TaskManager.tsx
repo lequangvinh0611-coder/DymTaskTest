@@ -178,6 +178,24 @@ const formatDateTime = (isoString?: string): string => {
   return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
 };
 
+const parseDeadlineDaysToString = (daysInput: any): string => {
+  if (Array.isArray(daysInput)) {
+    return daysInput.join(', ');
+  }
+  const trimmed = String(daysInput || '').trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.join(', ');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return trimmed;
+};
+
 // Helper to parse complex data out of standard 'description' column
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
   const defaultMeta: TaskMetadata = {
@@ -698,9 +716,7 @@ const TaskManager: React.FC = () => {
       est_time: st.est_time || st.estimated_minutes
     }));
     meta.sub_tasks = mappedSubtasks;
-    meta.deadline_days = Array.isArray((task as any).deadline_days)
-      ? (task as any).deadline_days.join(', ')
-      : (task as any).deadline_days || '';
+    meta.deadline_days = parseDeadlineDaysToString((task as any).deadline_days);
     meta.deadline_time = (task as any).deadline_time || '';
     
     // Update last updated info
@@ -737,9 +753,7 @@ const TaskManager: React.FC = () => {
       est_time: st.est_time || st.estimated_minutes
     }));
     meta.sub_tasks = mappedSubtasks;
-    meta.deadline_days = Array.isArray((task as any).deadline_days)
-      ? (task as any).deadline_days.join(', ')
-      : (task as any).deadline_days || '';
+    meta.deadline_days = parseDeadlineDaysToString((task as any).deadline_days);
     meta.deadline_time = (task as any).deadline_time || '';
 
     // Update last updated info
@@ -854,9 +868,7 @@ const TaskManager: React.FC = () => {
         team_name: openedDrawerTask.team_name || drawerParsedMeta?.team_name || '',
         tag_name: openedDrawerTask.tag_name || drawerParsedMeta?.tag_name || '',
         deadline_time: openedDrawerTask.deadline_time || '',
-        deadline_days: Array.isArray(openedDrawerTask.deadline_days)
-          ? openedDrawerTask.deadline_days.join(', ')
-          : String(openedDrawerTask.deadline_days || ''),
+        deadline_days: parseDeadlineDaysToString(openedDrawerTask.deadline_days),
         est_time: Number(openedDrawerTask.est_time || openedDrawerTask.estimated_minutes || 0),
         sub_tasks: (openedDrawerTask.subtasks || []).map((st: any) => ({
           content: st.content,

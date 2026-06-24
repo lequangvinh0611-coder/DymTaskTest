@@ -68,22 +68,39 @@ export default function App() {
         useAppStore.getState().fetchApproveTasks(true);
       }, 300);
 
+      // Map to debounce realtime updates per specific taskId to prevent redundant overlapping single-task selects
+      const taskDebounceMap: Record<string, any> = {};
+      const triggerTaskUpdate = (taskId: string) => {
+        if (!taskId) return;
+        if (taskDebounceMap[taskId]) {
+          clearTimeout(taskDebounceMap[taskId]);
+        }
+        taskDebounceMap[taskId] = setTimeout(() => {
+          useAppStore.getState().updateSingleTaskState(taskId);
+          delete taskDebounceMap[taskId];
+        }, 150);
+      };
+
       // Hàm đăng ký realtime đồng bộ dữ liệu toàn cục
       const subscribeRealtime = () => {
         if (channelRef.current) return;
 
         const channel = supabase.channel('global_app_realtime_sync')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
-            debouncedFetchTemplatesAndDaily();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload: any) => {
+            const taskId = payload.new?.id || payload.old?.id;
+            triggerTaskUpdate(taskId);
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => {
-            debouncedFetchTemplatesAndDaily();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, (payload: any) => {
+            const taskId = payload.new?.task_id || payload.old?.task_id;
+            triggerTaskUpdate(taskId);
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, () => {
-            debouncedFetchDailyOnly();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, (payload: any) => {
+            const taskId = payload.new?.task_id || payload.old?.task_id;
+            triggerTaskUpdate(taskId);
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, () => {
-            debouncedFetchDailyOnly();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, (payload: any) => {
+            const taskId = payload.new?.task_id || payload.old?.task_id;
+            triggerTaskUpdate(taskId);
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
             debouncedFetchMetadata();

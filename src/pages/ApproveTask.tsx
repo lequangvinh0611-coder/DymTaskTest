@@ -276,22 +276,53 @@ const normalizeDaysOfWeek = (dayStrOrArray: any): string[] => {
 };
 
 const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesList: string[] } => {
-  let dates: string[] = [];
+  let rawItems: string[] = [];
+  
   if (Array.isArray(daysInput)) {
-    dates = daysInput.map(d => String(d).trim()).filter(Boolean);
+    rawItems = daysInput.map(d => String(d).trim()).filter(Boolean);
   } else {
     const trimmed = String(daysInput || '').trim();
-    if (trimmed.includes('~')) {
-      const parts = trimmed.split('~').map(d => d.trim()).filter(Boolean);
-      dates = parts;
-    } else if (trimmed.includes(',')) {
-      dates = trimmed.split(',').map(d => d.trim()).filter(Boolean);
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          rawItems = parsed.map(d => String(d).trim()).filter(Boolean);
+        } else {
+          rawItems = [String(parsed).trim()];
+        }
+      } catch (e) {
+        rawItems = [trimmed];
+      }
     } else if (trimmed) {
-      dates = [trimmed];
+      rawItems = [trimmed];
     }
   }
 
-  const cleanDates = dates.map(d => d.replace(/\//g, '-')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  let dates: string[] = [];
+  rawItems.forEach(item => {
+    if (item.includes('~')) {
+      const parts = item.split('~').map(d => d.trim().replace(/\//g, '-')).filter(Boolean);
+      parts.forEach(p => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
+          dates.push(p);
+        }
+      });
+    } else if (item.includes(',')) {
+      const parts = item.split(',').map(d => d.trim().replace(/\//g, '-')).filter(Boolean);
+      parts.forEach(p => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
+          dates.push(p);
+        }
+      });
+    } else {
+      const clean = item.replace(/\//g, '-');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+        dates.push(clean);
+      }
+    }
+  });
+
+  const cleanDates = [...new Set(dates)];
 
   if (cleanDates.length === 0) {
     const today = new Date().toISOString().slice(0, 10);
@@ -302,7 +333,7 @@ const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesL
   const start = cleanDates[0];
   const end = cleanDates[cleanDates.length - 1];
 
-  const datesList = [];
+  const datesList: string[] = [];
   try {
     let curr = new Date(start);
     const last = new Date(end);
@@ -314,11 +345,25 @@ const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesL
     console.error(err);
   }
 
-  if (datesList.length === 0) {
-    return { start, end, datesList: cleanDates };
-  }
+  return { start, end, datesList: datesList.length > 0 ? datesList : cleanDates };
+};
 
-  return { start, end, datesList };
+const parseDeadlineDaysToString = (daysInput: any): string => {
+  if (Array.isArray(daysInput)) {
+    return daysInput.join(', ');
+  }
+  const trimmed = String(daysInput || '').trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.join(', ');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return trimmed;
 };
 
 const determineIsScheduledToday = (taskType: string, deadlineDays: any, onetimeTargets?: any[]): boolean => {
@@ -875,9 +920,7 @@ const ApproveTask: React.FC = () => {
             team_name: originalTask.team_name || latestMeta.team_name || '',
             tag_name: originalTask.tag_name || latestMeta.tag_name || '',
             deadline_time: originalTask.deadline_time || latestMeta.deadline_time || '',
-            deadline_days: Array.isArray(originalTask.deadline_days)
-              ? originalTask.deadline_days.join(', ')
-              : String(originalTask.deadline_days || latestMeta.deadline_days || ''),
+            deadline_days: parseDeadlineDaysToString(originalTask.deadline_days),
             est_time: Number(originalTask.est_time || originalTask.estimated_minutes || 0),
             sub_tasks: (originalSubs || latestMeta.sub_tasks || []).map((st: any) => ({
               id: st.id,
@@ -1235,9 +1278,7 @@ const ApproveTask: React.FC = () => {
                 team_name: teamName,
                 tag_name: data.tag_name || '',
                 deadline_time: data.deadline_time || '17:00',
-                deadline_days: Array.isArray(data.deadline_days)
-                  ? data.deadline_days.join(', ')
-                  : String(data.deadline_days || 'Mon - Fri'),
+                deadline_days: parseDeadlineDaysToString(data.deadline_days),
                 sub_tasks: (data.subtasks || []).map((st: any) => ({
                   id: st.id,
                   content: st.content,
@@ -1514,9 +1555,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         team_name: originalTask.meta?.team_name || originalTask.team_name || '',
         tag_name: originalTask.meta?.tag_name || originalTask.tag_name || '',
         deadline_time: originalTask.deadline_time || '',
-        deadline_days: Array.isArray(originalTask.deadline_days)
-          ? originalTask.deadline_days.join(', ')
-          : String(originalTask.deadline_days || ''),
+        deadline_days: parseDeadlineDaysToString(originalTask.deadline_days),
         est_time: Number(originalTask.est_time || originalTask.estimated_minutes || 0),
         sub_tasks: (originalTask.subtasks || []).map((st: any) => ({
           content: st.content,

@@ -162,22 +162,53 @@ const normalizeDaysOfWeek = (dayStrOrArray: any): string[] => {
 };
 
 const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesList: string[] } => {
-  let dates: string[] = [];
+  let rawItems: string[] = [];
+  
   if (Array.isArray(daysInput)) {
-    dates = daysInput.map(d => String(d).trim()).filter(Boolean);
+    rawItems = daysInput.map(d => String(d).trim()).filter(Boolean);
   } else {
     const trimmed = String(daysInput || '').trim();
-    if (trimmed.includes('~')) {
-      const parts = trimmed.split('~').map(d => d.trim()).filter(Boolean);
-      dates = parts;
-    } else if (trimmed.includes(',')) {
-      dates = trimmed.split(',').map(d => d.trim()).filter(Boolean);
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          rawItems = parsed.map(d => String(d).trim()).filter(Boolean);
+        } else {
+          rawItems = [String(parsed).trim()];
+        }
+      } catch (e) {
+        rawItems = [trimmed];
+      }
     } else if (trimmed) {
-      dates = [trimmed];
+      rawItems = [trimmed];
     }
   }
 
-  const cleanDates = dates.map(d => d.replace(/\//g, '-')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  let dates: string[] = [];
+  rawItems.forEach(item => {
+    if (item.includes('~')) {
+      const parts = item.split('~').map(d => d.trim().replace(/\//g, '-')).filter(Boolean);
+      parts.forEach(p => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
+          dates.push(p);
+        }
+      });
+    } else if (item.includes(',')) {
+      const parts = item.split(',').map(d => d.trim().replace(/\//g, '-')).filter(Boolean);
+      parts.forEach(p => {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
+          dates.push(p);
+        }
+      });
+    } else {
+      const clean = item.replace(/\//g, '-');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+        dates.push(clean);
+      }
+    }
+  });
+
+  const cleanDates = [...new Set(dates)];
 
   if (cleanDates.length === 0) {
     const today = new Date().toISOString().slice(0, 10);
@@ -188,7 +219,7 @@ const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesL
   const start = cleanDates[0];
   const end = cleanDates[cleanDates.length - 1];
 
-  const datesList = [];
+  const datesList: string[] = [];
   try {
     let curr = new Date(start);
     const last = new Date(end);
@@ -200,11 +231,25 @@ const parseOnetimeDates = (daysInput: any): { start: string; end: string; datesL
     console.error(err);
   }
 
-  if (datesList.length === 0) {
-    return { start, end, datesList: cleanDates };
-  }
+  return { start, end, datesList: datesList.length > 0 ? datesList : cleanDates };
+};
 
-  return { start, end, datesList };
+const parseDeadlineDaysToString = (daysInput: any): string => {
+  if (Array.isArray(daysInput)) {
+    return daysInput.join(', ');
+  }
+  const trimmed = String(daysInput || '').trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.join(', ');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return trimmed;
 };
 
 const parseTaskDescription = (rawDescription: any): TaskMetadata => {
@@ -399,7 +444,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         }
 
         const daysInput = meta.deadline_days || (taskToEdit as any).deadline_days || '';
-        const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : String(daysInput || '');
+        const daysStr = parseDeadlineDaysToString(daysInput);
         let startDt = '';
         let endDt = '';
         if (taskToEdit.task_type === 'DAILY') {
@@ -471,7 +516,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         }
 
         const daysInput = meta.deadline_days || (taskToClone as any).deadline_days || '';
-        const daysStr = Array.isArray(daysInput) ? daysInput.join(', ') : String(daysInput || '');
+        const daysStr = parseDeadlineDaysToString(daysInput);
         let startDt = '';
         let endDt = '';
         if (taskToClone.task_type === 'DAILY') {
