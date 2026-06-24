@@ -1215,13 +1215,12 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       const allSkipped = subtaskLogsToSave.length > 0 && subtaskLogsToSave.every(s => s.status === 'SKIPPED');
       const newStatus = allSkipped ? 'SKIPPED' : 'DONE';
 
-      // 3. Save subtask logs to DB
+      // 3. Save subtask logs to DB in a single batch upsert
       if (subtaskLogsToSave.length > 0) {
-        await Promise.all(subtaskLogsToSave.map(async (payload) => {
-          await supabase
-            .from('subtask_logs')
-            .upsert(payload, { onConflict: 'subtask_id,todo_date' });
-        }));
+        const { error: subtaskErr } = await supabase
+          .from('subtask_logs')
+          .upsert(subtaskLogsToSave, { onConflict: 'subtask_id,todo_date' });
+        if (subtaskErr) throw subtaskErr;
       }
 
       // 4. Save parent task log to DB
@@ -1439,26 +1438,27 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
       if (logErr) throw logErr;
 
-      // 2. Also upsert all subtask logs of this task to SKIPPED for this date
-      await Promise.all((task.sub_tasks || []).map(async (sub) => {
-        await supabase
-          .from('subtask_logs')
-          .upsert({
-            subtask_id: sub.id,
-            task_id: task.id,
-            todo_date: task.todo_date,
-            status: 'SKIPPED',
-            is_completed: false,
-            completed_by: updaterName,
-            team_name: sub.team_name || '',
-            content: sub.content || sub.name || '',
-            assignee: sub.assignee || '',
-            est_time: sub.est_time || (sub as any).estimated_minutes || 0,
-            actual_time: 0
-          }, {
-            onConflict: 'subtask_id,todo_date'
-          });
+      // 2. Also upsert all subtask logs of this task to SKIPPED for this date in a single batch upsert
+      const skippedSubtaskLogs = (task.sub_tasks || []).map((sub) => ({
+        subtask_id: sub.id,
+        task_id: task.id,
+        todo_date: task.todo_date,
+        status: 'SKIPPED',
+        is_completed: false,
+        completed_by: updaterName,
+        team_name: sub.team_name || '',
+        content: sub.content || sub.name || '',
+        assignee: sub.assignee || '',
+        est_time: sub.est_time || (sub as any).estimated_minutes || 0,
+        actual_time: 0
       }));
+
+      if (skippedSubtaskLogs.length > 0) {
+        const { error: subtaskErr } = await supabase
+          .from('subtask_logs')
+          .upsert(skippedSubtaskLogs, { onConflict: 'subtask_id,todo_date' });
+        if (subtaskErr) throw subtaskErr;
+      }
 
       // 3. Update dailyTasks locally in useAppStore
       useAppStore.setState(state => {
@@ -1605,31 +1605,34 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     try {
       const completedBy = activeUser?.name || activeUser?.email || 'Unknown';
 
-      // Save subtask logs to DB as well for each subtask to ensure perfect synchronization
-      await Promise.all((taskToSave.sub_tasks || []).map(async (sub) => {
+      // Save subtask logs to DB in a single batch upsert to ensure perfect synchronization
+      const subtaskLogsToSave = (taskToSave.sub_tasks || []).map((sub) => {
         const nextVal = sub.sub_status || 'New';
         const statusUpper = nextVal.toUpperCase();
         const isCompleted = nextVal === 'Done';
         const calcAct = isCompleted ? (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined && (sub as any).actual_minutes !== null ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0))) : 0;
-        
-        await supabase
+
+        return {
+          subtask_id: sub.id,
+          task_id: taskToSave.id,
+          todo_date: taskToSave.todo_date,
+          status: statusUpper,
+          is_completed: isCompleted,
+          completed_by: completedBy,
+          team_name: sub.team_name || '',
+          content: sub.content || sub.name || '',
+          assignee: sub.assignee || '',
+          est_time: sub.est_time || (sub as any).estimated_minutes || 0,
+          actual_time: calcAct
+        };
+      });
+
+      if (subtaskLogsToSave.length > 0) {
+        const { error: subtaskErr } = await supabase
           .from('subtask_logs')
-          .upsert({
-            subtask_id: sub.id,
-            task_id: taskToSave.id,
-            todo_date: taskToSave.todo_date,
-            status: statusUpper,
-            is_completed: isCompleted,
-            completed_by: completedBy,
-            team_name: sub.team_name || '',
-            content: sub.content || sub.name || '',
-            assignee: sub.assignee || '',
-            est_time: sub.est_time || (sub as any).estimated_minutes || 0,
-            actual_time: calcAct
-          }, {
-            onConflict: 'subtask_id,todo_date'
-          });
-      }));
+          .upsert(subtaskLogsToSave, { onConflict: 'subtask_id,todo_date' });
+        if (subtaskErr) throw subtaskErr;
+      }
 
       // In RDBMS mode, let's also update the task_logs status to DONE if everything is Done, or handle normally
       const hasNewSubTask = (taskToSave.sub_tasks || []).some(sub => (sub.sub_status || 'New') === 'New');

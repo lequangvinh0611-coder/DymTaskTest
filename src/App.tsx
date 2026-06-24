@@ -68,6 +68,25 @@ export default function App() {
         useAppStore.getState().fetchApproveTasks(true);
       }, 300);
 
+      // Helper to resolve parent taskId from any nested entity id when payload.old.task_id is missing (e.g. on DELETE)
+      const getTaskIdByNestedId = (nestedId: string, type: 'subtask' | 'task_log' | 'subtask_log'): string | null => {
+        if (!nestedId) return null;
+        const state = useAppStore.getState();
+        if (type === 'subtask') {
+          const foundDaily = state.dailyTasks.find(t => t.subtasks?.some((s: any) => s.id === nestedId));
+          if (foundDaily) return foundDaily.id;
+          const foundGlobal = state.tasks.find(t => t.subtasks?.some((s: any) => s.id === nestedId));
+          if (foundGlobal) return foundGlobal.id;
+        } else if (type === 'task_log') {
+          const foundDaily = state.dailyTasks.find(t => t.task_logs?.some((l: any) => l.id === nestedId));
+          if (foundDaily) return foundDaily.id;
+        } else if (type === 'subtask_log') {
+          const foundDaily = state.dailyTasks.find(t => t.subtask_logs?.some((l: any) => l.id === nestedId));
+          if (foundDaily) return foundDaily.id;
+        }
+        return null;
+      };
+
       // Map to debounce realtime updates per specific taskId to prevent redundant overlapping single-task selects
       const taskDebounceMap: Record<string, any> = {};
       const triggerTaskUpdate = (taskId: string) => {
@@ -89,18 +108,32 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload: any) => {
             const taskId = payload.new?.id || payload.old?.id;
             triggerTaskUpdate(taskId);
+            
+            // On hard structural modifications (INSERT / DELETE), refresh full templates & schedule in background
+            if (payload.eventType === 'INSERT' || payload.eventType === 'DELETE') {
+              debouncedFetchTemplatesAndDaily();
+            }
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, (payload: any) => {
-            const taskId = payload.new?.task_id || payload.old?.task_id;
-            triggerTaskUpdate(taskId);
+            const taskId = payload.new?.task_id || payload.old?.task_id || getTaskIdByNestedId(payload.old?.id || payload.new?.id, 'subtask');
+            if (taskId) {
+              triggerTaskUpdate(taskId);
+            }
+            if (payload.eventType === 'INSERT' || payload.eventType === 'DELETE') {
+              debouncedFetchTemplatesAndDaily();
+            }
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, (payload: any) => {
-            const taskId = payload.new?.task_id || payload.old?.task_id;
-            triggerTaskUpdate(taskId);
+            const taskId = payload.new?.task_id || payload.old?.task_id || getTaskIdByNestedId(payload.old?.id || payload.new?.id, 'task_log');
+            if (taskId) {
+              triggerTaskUpdate(taskId);
+            }
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, (payload: any) => {
-            const taskId = payload.new?.task_id || payload.old?.task_id;
-            triggerTaskUpdate(taskId);
+            const taskId = payload.new?.task_id || payload.old?.task_id || getTaskIdByNestedId(payload.old?.id || payload.new?.id, 'subtask_log');
+            if (taskId) {
+              triggerTaskUpdate(taskId);
+            }
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
             debouncedFetchMetadata();
@@ -117,7 +150,15 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'approve_tasks' }, () => {
             debouncedFetchApproveTasks();
           })
-          .subscribe();
+          .subscribe((status, err) => {
+            if (status === 'SUBSCRIBED') {
+              console.log('[Realtime] Successfully subscribed to global sync channel');
+            } else if (status === 'CHANNEL_ERROR') {
+              console.error('[Realtime] Channel error occurred:', err);
+            } else if (status === 'TIMED_OUT') {
+              console.warn('[Realtime] Subscription timed out');
+            }
+          });
 
         channelRef.current = channel;
       };

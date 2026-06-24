@@ -424,7 +424,8 @@ const ApproveTask: React.FC = () => {
     fetchMetadata,
     approveTasks,
     fetchApproveTasks,
-    fetchTasks
+    fetchTasks,
+    tasks
   } = useAppStore();
 
   const { profile } = useAuthStore();
@@ -490,8 +491,8 @@ const ApproveTask: React.FC = () => {
   const [page, setPage] = useState(1);
   const pageSize = 15;
 
-  const loadRequests = async () => {
-    setLoading(true);
+  const loadRequests = async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     try {
       await fetchApproveTasks(true);
       setTableMissing(false);
@@ -515,12 +516,16 @@ const ApproveTask: React.FC = () => {
         toast.error('Failed to load approve tasks creation requests.');
       }
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
   const getOriginalTaskDisplayId = (originalTaskId: string) => {
     if (!originalTaskId) return '';
+    const task = tasks.find(t => t.id === originalTaskId);
+    if (task && task.display_id !== undefined && task.display_id !== null) {
+      return String(task.display_id).padStart(6, '0');
+    }
     const displayId = originalTasksMap[originalTaskId];
     if (displayId !== undefined && displayId !== null) {
       return String(displayId).padStart(6, '0');
@@ -1099,7 +1104,7 @@ const ApproveTask: React.FC = () => {
       setOpenedDrawerTask(null);
       // 5. Synchronize App store
       await fetchTasks(true);
-      await loadRequests();
+      await loadRequests(true);
 
     } catch (err: any) {
       console.error('[ApproveTask] Error accepting request:', err);
@@ -1181,7 +1186,7 @@ const ApproveTask: React.FC = () => {
       setIsRejectDialogOpen(false);
       setRejectDialogTask(null);
       setRejectReasonInput('');
-      loadRequests();
+      loadRequests(true);
     } catch (err: any) {
       console.error('[ApproveTask] Error rejecting:', err);
       toast.error(`Database Error: ${err.message || 'Could not reject request'}`);
@@ -1211,7 +1216,7 @@ const ApproveTask: React.FC = () => {
 
           toast.success('Task request deleted successfully.');
           setOpenedDrawerTask(null);
-          loadRequests();
+          loadRequests(true);
         } catch (err: any) {
           console.error('[ApproveTask] Error deleting:', err);
           toast.error(`Database Error: ${err.message || 'Could not delete request record'}`);
@@ -2371,7 +2376,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSuccess={() => {
-          loadRequests();
+          loadRequests(true);
           if (openedDrawerTask) {
             setOpenedDrawerTask(null);
           }
