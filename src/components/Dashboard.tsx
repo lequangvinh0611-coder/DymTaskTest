@@ -144,7 +144,18 @@ const getVirtualOccurrences = (
   bypassCreatedAt: boolean = false
 ): Array<{ todo_date: string; origin_repeat_day?: number; completion_key: string }> => {
   const type = (task_type || '').toUpperCase();
-  const cleanDays = (deadline_days || '').trim();
+  let cleanDays = (deadline_days || '').trim();
+
+  if (cleanDays.startsWith('[') && cleanDays.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(cleanDays);
+      if (Array.isArray(parsed)) {
+        cleanDays = parsed.join(', ').trim();
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
 
   const occurrences: Array<{ todo_date: string; origin_repeat_day?: number; completion_key: string }> = [];
 

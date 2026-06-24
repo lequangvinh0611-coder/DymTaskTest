@@ -441,11 +441,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           completions
         };
 
+        const resolvedTaskName = task.task_name || task.title || '';
+        const resolvedType = task.type || task.task_type || 'DAILY';
+
         return {
           ...task,
           description: JSON.stringify(enrichedMeta),
-          task_name: task.title,
-          type: task.task_type
+          task_name: resolvedTaskName,
+          title: resolvedTaskName,
+          type: resolvedType,
+          task_type: resolvedType
         };
       });
 
@@ -561,11 +566,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           };
         });
 
+        const resolvedTaskName = task.task_name || task.title || '';
+        const resolvedType = task.type || task.task_type || 'DAILY';
+
         return {
           ...task,
           description: JSON.stringify(meta),
-          task_name: task.task_name || task.title, // Backward compatibility with task_name property
-          type: task.type || task.task_type, // Map task_type to legacy type
+          task_name: resolvedTaskName,
+          title: resolvedTaskName,
+          type: resolvedType,
+          task_type: resolvedType,
           subtasks: subtasksWithLogs,
           task_logs: taskLogs,
           subtask_logs: taskSubtaskLogs
