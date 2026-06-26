@@ -348,20 +348,50 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ tasksLoading: true });
     try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select(`
-          *,
-          subtasks(*),
-          task_logs(*),
-          subtask_logs(*)
-        `)
-        .order('created_at', { ascending: false });
+      const dateLimit = new Date();
+      dateLimit.setDate(dateLimit.getDate() - 14); // Optimize: 14 days is super fast and 100% sufficient for active dashboard tracking
+      const fourteenDaysAgo = dateLimit.toISOString().split('T')[0];
 
-      if (error) throw error;
+      const activeDaysLimit = new Date();
+      activeDaysLimit.setDate(activeDaysLimit.getDate() - 180); // Restrict ancient inactive templates (180 days) to prevent statement timeouts
+      const halfYearAgoStr = activeDaysLimit.toISOString().split('T')[0];
+
+      const [tasksRes, taskLogsRes, subtaskLogsRes] = await Promise.all([
+        supabase
+          .from('tasks')
+          .select('*, subtasks(*)')
+          .or(`is_active.eq.true,created_at.gte.${halfYearAgoStr}`)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('task_logs')
+          .select('*')
+          .gte('todo_date', fourteenDaysAgo),
+        supabase
+          .from('subtask_logs')
+          .select('*')
+          .gte('todo_date', fourteenDaysAgo)
+      ]);
+
+      if (tasksRes.error) throw tasksRes.error;
+
+      // Resilient fallbacks for logs tables (avoid crashing/throwing on statement timeouts)
+      if (taskLogsRes.error) {
+        console.warn('[Sync] Failed to fetch task logs due to performance limit or timeout. Falling back to empty. Details:', taskLogsRes.error);
+      }
+      if (subtaskLogsRes.error) {
+        console.warn('[Sync] Failed to fetch subtask logs due to performance limit or timeout. Falling back to empty. Details:', subtaskLogsRes.error);
+      }
+
+      const tasksRaw = tasksRes.data || [];
+      const allTaskLogs = taskLogsRes.data || [];
+      const allSubtaskLogs = subtaskLogsRes.data || [];
 
       // Hydrate backward-compatible completions object on descriptions in-memory
-      const processed = (data || []).map((tRaw: any) => {
+      const processed = tasksRaw.map((tRaw: any) => {
+        // Populate task_logs and subtask_logs
+        tRaw.task_logs = allTaskLogs.filter((log: any) => log.task_id === tRaw.id);
+        tRaw.subtask_logs = allSubtaskLogs.filter((log: any) => log.task_id === tRaw.id);
+
         // Enforce unique subtasks by database primary key id to prevent double subtasks
         const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) =>
           self.findIndex((s: any) => s.id === sub.id) === index
@@ -699,12 +729,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (hasUpdatedAtColumn) {
         const { data, error } = await supabase
           .from('tasks')
-          .select(`
-            *,
-            subtasks(*),
-            task_logs(*),
-            subtask_logs(*)
-          `)
+          .select('*, subtasks(*)')
           .gt('updated_at', lastSync);
         
         if (error) {
@@ -722,12 +747,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!hasUpdatedAtColumn && !tasksError) {
         const { data, error } = await supabase
           .from('tasks')
-          .select(`
-            *,
-            subtasks(*),
-            task_logs(*),
-            subtask_logs(*)
-          `)
+          .select('*, subtasks(*)')
           .gt('created_at', lastSync);
         
         if (error) {
@@ -738,6 +758,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       if (tasksError) throw tasksError;
+
+      const tasksList = updatedTasksRaw || [];
+      if (tasksList.length > 0) {
+        const updatedTaskIds = tasksList.map((t: any) => t.id);
+        const [taskLogsRes, subtaskLogsRes] = await Promise.all([
+          supabase
+            .from('task_logs')
+            .select('*')
+            .in('task_id', updatedTaskIds),
+          supabase
+            .from('subtask_logs')
+            .select('*')
+            .in('task_id', updatedTaskIds)
+        ]);
+
+        const taskLogsData = taskLogsRes.data || [];
+        const subtaskLogsData = subtaskLogsRes.data || [];
+
+        tasksList.forEach((tRaw: any) => {
+          const taskId = tRaw.id;
+          tRaw.task_logs = taskLogsData.filter((l: any) => l.task_id === taskId);
+          tRaw.subtask_logs = subtaskLogsData.filter((l: any) => l.task_id === taskId);
+        });
+      }
 
       // 2. Fetch riêng lại các logs nằm trong khoảng startDate đến endDate hiện tại để bổ sung nếu cần
       let taskLogsData: any[] = [];
