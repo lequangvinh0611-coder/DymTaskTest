@@ -25,8 +25,6 @@ export default function App() {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
   const channelRef = useRef<any>(null);
-  const inactiveTimerRef = useRef<any>(null);
-  const isSuspendedRef = useRef<boolean>(false);
 
   useEffect(() => {
     initializeAuth();
@@ -138,34 +136,12 @@ export default function App() {
       subscribeRealtime();
 
       // Theo dõi trạng thái hiển thị của tab trình duyệt
-      const handleVisibilityChange = () => {
-        if (document.hidden) {
-          // Người dùng rời tab: Thiết lập hẹn giờ ngắt đồng bộ ngầm sau 1 phút
-          if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
+      const handleVisibilityChange = async () => {
+        if (!document.hidden) {
+          // Gọi syncDeltaUpdates để đồng bộ delta dữ liệu khi quay lại tab
+          const success = await useAppStore.getState().syncDeltaUpdates();
 
-          inactiveTimerRef.current = setTimeout(() => {
-            unsubscribeRealtime();
-            isSuspendedRef.current = true;
-          }, 60000); // 1 phút (60,000ms)
-        } else {
-          // Người dùng quay lại tab: Hủy bộ hẹn giờ ngắt
-          if (inactiveTimerRef.current) {
-            clearTimeout(inactiveTimerRef.current);
-            inactiveTimerRef.current = null;
-          }
-
-          // Khôi phục kết nối và tự động tải lại dữ liệu mới nhất nếu đã bị đình bản
-          if (isSuspendedRef.current) {
-            isSuspendedRef.current = false;
-
-            // Load dữ liệu mới nhất trong nền
-            fetchMetadata();
-            fetchTasks();
-            fetchApproveTasks();
-
-            // Kết nối lại kênh realtime
-            subscribeRealtime();
-
+          if (success) {
             // Subtle toast message for professional, polished feedback
             toast.success('System data synchronized successfully!', {
               id: 'realtime-tab-refresh',
@@ -179,7 +155,6 @@ export default function App() {
 
       return () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
-        if (inactiveTimerRef.current) clearTimeout(inactiveTimerRef.current);
         unsubscribeRealtime();
       };
     }

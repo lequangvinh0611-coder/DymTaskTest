@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { supabase } from './lib/supabase';
 
+let hasUpdatedAtColumn = true;
+
 export type UserRole = 'master' | 'admin' | 'user';
 
 export interface User {
@@ -129,6 +131,9 @@ export interface AppState {
   tagsList: string[];
   assigneesList: string[];
   usersFullList: any[];
+  projectsFullList: any[];
+  teamsFullList: any[];
+  tagsFullList: any[];
   metadataLoaded: boolean;
   metadataLoading: boolean;
   tasks: any[];
@@ -148,11 +153,18 @@ export interface AppState {
   endDate: string;
   setDates: (start: string, end: string) => void;
 
+  // Active tasks templates cache to optimize fetchDailyTasks
+  activeTasksTemplates: any[];
+  activeTasksTemplatesLoaded: boolean;
+
   fetchMetadata: (force?: boolean) => Promise<void>;
   fetchTasks: (force?: boolean) => Promise<void>;
   fetchApproveTasks: (force?: boolean) => Promise<void>;
-  fetchDailyTasks: (startDateString: string, endDateString?: string, isSilent?: boolean) => Promise<void>;
+  fetchDailyTasks: (startDateString: string, endDateString?: string, isSilent?: boolean, forceTemplates?: boolean) => Promise<void>;
   setTasks: (tasks: any[] | ((prev: any[]) => any[])) => void;
+  lastSyncTime: string;
+  setLastSyncTime: (time: string) => void;
+  syncDeltaUpdates: () => Promise<boolean>;
 }
 
 // Helper to parse description
@@ -250,6 +262,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   tagsList: [],
   assigneesList: [],
   usersFullList: [],
+  projectsFullList: [],
+  teamsFullList: [],
+  tagsFullList: [],
   metadataLoaded: false,
   metadataLoading: false,
   tasks: [],
@@ -264,9 +279,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   dailyTasksLoaded: false,
   dailyTasksLoading: false,
 
+  // Active tasks templates cache to optimize fetchDailyTasks
+  activeTasksTemplates: [],
+  activeTasksTemplatesLoaded: false,
+
   // Date tracking for daily tasks
   startDate: typeof window !== 'undefined' ? (sessionStorage.getItem('todo_startDate') || getTodayDateStringInternal()) : '',
   endDate: typeof window !== 'undefined' ? (sessionStorage.getItem('todo_endDate') || getTodayDateStringInternal()) : '',
+  lastSyncTime: new Date().toISOString(),
   setDates: (start: string, end: string) => set({ startDate: start, endDate: end }),
 
   fetchMetadata: async (force = false) => {
@@ -280,10 +300,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         { data: teamsData },
         { data: tagsData }
       ] = await Promise.all([
-        supabase.from('users').select('name, status, team_ids'),
-        supabase.from('projects').select('name, is_active'),
-        supabase.from('teams').select('name, is_active'),
-        supabase.from('tags').select('name, is_active')
+        supabase.from('users').select('id, email, name, role, team_ids, status, created_at').order('created_at', { ascending: false }),
+        supabase.from('projects').select('id, name, is_active, created_at').order('created_at', { ascending: false }),
+        supabase.from('teams').select('id, name, is_active, created_at').order('created_at', { ascending: false }),
+        supabase.from('tags').select('id, name, is_active, created_at').order('created_at', { ascending: false })
       ]);
 
       const activeUsers = (usersData || [])
@@ -308,6 +328,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         teamsList: activeTms,
         tagsList: activeTgs,
         usersFullList: usersData || [],
+        projectsFullList: projectsData || [],
+        teamsFullList: teamsData || [],
+        tagsFullList: tagsData || [],
         metadataLoaded: true,
         metadataLoading: false
       });
@@ -320,6 +343,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchTasks: async (force = false) => {
     if (!force && get().tasksLoading) return;
     if (get().tasksLoaded && !force) return;
+    if (force) {
+      set({ activeTasksTemplatesLoaded: false });
+    }
     set({ tasksLoading: true });
     try {
       const { data, error } = await supabase
@@ -470,7 +496,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       // Tự động đồng bộ hóa dailyTasks khi fetchTasks(true) được gọi để tránh lệch dữ liệu giữa các tab
       if (force && get().startDate) {
-        get().fetchDailyTasks(get().startDate, get().endDate, true);
+        get().fetchDailyTasks(get().startDate, get().endDate, true, true);
       }
     } catch (err: any) {
       console.error('Error fetching global tasks:', err);
@@ -503,22 +529,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchDailyTasks: async (startDateString: string, endDateString?: string, isSilent = false) => {
+  fetchDailyTasks: async (startDateString: string, endDateString?: string, isSilent = false, forceTemplates = false) => {
     if (!isSilent && get().dailyTasksLoading) return;
     set({ 
       dailyTasksLoading: true, 
       ...(isSilent ? {} : { dailyTasksLoaded: false })
     });
     try {
-      // 1. Fetch all template tasks and nested subtasks
-      const { data: tasksData, error: tasksError } = await supabase
-        .from('tasks')
-        .select(`
-          *,
-          subtasks(*)
-        `);
+      let tasksData = get().activeTasksTemplates;
+      
+      if (forceTemplates || !get().activeTasksTemplatesLoaded || tasksData.length === 0) {
+        // 1. Chỉ tải các task bản mẫu đang hoạt động (is_active = true) kèm subtasks của chúng khi chưa có cache hoặc bị buộc tải lại
+        // Giải pháp này giúp hệ thống hoạt động cực kỳ mượt mà khi số lượng task lưu trữ lớn lên theo thời gian.
+        const { data: activeTasks, error: tasksError } = await supabase
+          .from('tasks')
+          .select(`
+            *,
+            subtasks(*)
+          `)
+          .eq('is_active', true);
 
-      if (tasksError) throw tasksError;
+        if (tasksError) throw tasksError;
+        tasksData = activeTasks || [];
+        set({ 
+          activeTasksTemplates: tasksData,
+          activeTasksTemplatesLoaded: true
+        });
+      }
 
       // 2. Fetch daily logs for the target date or date range
       let taskLogsQuery = supabase.from('task_logs').select('*');
@@ -539,6 +576,29 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const taskLogsData = taskLogsRes.data || [];
       const subtaskLogsData = subtaskLogsRes.data || [];
+
+      // 3. Tìm các task ID đã bị tắt hoạt động (inactive) nhưng vẫn có dữ liệu log lịch sử trong ngày này để tải bổ sung
+      const activeTaskIds = new Set((tasksData || []).map(t => t.id));
+      const loggedTaskIds = new Set([
+        ...taskLogsData.map(log => log.task_id),
+        ...subtaskLogsData.map(log => log.task_id)
+      ].filter(Boolean));
+
+      const missingTaskIds = Array.from(loggedTaskIds).filter(id => !activeTaskIds.has(id));
+
+      if (missingTaskIds.length > 0) {
+        const { data: historicalTasks, error: histError } = await supabase
+          .from('tasks')
+          .select(`
+            *,
+            subtasks(*)
+          `)
+          .in('id', missingTaskIds);
+        
+        if (!histError && historicalTasks) {
+          tasksData = [...tasksData, ...historicalTasks];
+        }
+      }
 
       // 3. Assemble and virtualize on the frontend
       const processed = (tasksData || []).map((tRaw: any) => {
@@ -623,5 +683,384 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ tasks: tasksUpdater });
     }
+  },
+
+  setLastSyncTime: (time) => set({ lastSyncTime: time }),
+
+  syncDeltaUpdates: async (): Promise<boolean> => {
+    const lastSync = get().lastSyncTime;
+    const now = new Date().toISOString();
+
+    try {
+      // 1. Query bảng tasks (kèm subtasks, task_logs, subtask_logs) với điều kiện .gt('updated_at', lastSync) hoặc .gt('created_at', lastSync)
+      let updatedTasksRaw: any[] | null = null;
+      let tasksError: any = null;
+
+      if (hasUpdatedAtColumn) {
+        const { data, error } = await supabase
+          .from('tasks')
+          .select(`
+            *,
+            subtasks(*),
+            task_logs(*),
+            subtask_logs(*)
+          `)
+          .gt('updated_at', lastSync);
+        
+        if (error) {
+          if (error.code === '42703') {
+            hasUpdatedAtColumn = false;
+            console.log('[Sync] tasks.updated_at column does not exist. Switching to created_at for delta sync.');
+          } else {
+            tasksError = error;
+          }
+        } else {
+          updatedTasksRaw = data;
+        }
+      }
+
+      if (!hasUpdatedAtColumn && !tasksError) {
+        const { data, error } = await supabase
+          .from('tasks')
+          .select(`
+            *,
+            subtasks(*),
+            task_logs(*),
+            subtask_logs(*)
+          `)
+          .gt('created_at', lastSync);
+        
+        if (error) {
+          tasksError = error;
+        } else {
+          updatedTasksRaw = data;
+        }
+      }
+
+      if (tasksError) throw tasksError;
+
+      // 2. Fetch riêng lại các logs nằm trong khoảng startDate đến endDate hiện tại để bổ sung nếu cần
+      let taskLogsData: any[] = [];
+      let subtaskLogsData: any[] = [];
+      const startDate = get().startDate;
+      const endDate = get().endDate;
+
+      if (startDate) {
+        let taskLogsQuery = supabase.from('task_logs').select('*');
+        let subtaskLogsQuery = supabase.from('subtask_logs').select('*');
+
+        if (endDate) {
+          taskLogsQuery = taskLogsQuery.gte('todo_date', startDate).lte('todo_date', endDate);
+          subtaskLogsQuery = subtaskLogsQuery.gte('todo_date', startDate).lte('todo_date', endDate);
+        } else {
+          taskLogsQuery = taskLogsQuery.eq('todo_date', startDate);
+          subtaskLogsQuery = subtaskLogsQuery.eq('todo_date', startDate);
+        }
+
+        const [taskLogsRes, subtaskLogsRes] = await Promise.all([
+          taskLogsQuery,
+          subtaskLogsQuery
+        ]);
+
+        taskLogsData = taskLogsRes.data || [];
+        subtaskLogsData = subtaskLogsRes.data || [];
+      }
+
+      // Helper function to merge logs (replaces only target dates' logs in the task's raw logs)
+      const mergeLogs = (existingLogs: any[] = [], fetchedLogs: any[] = [], start?: string, end?: string) => {
+        if (!start) return existingLogs;
+        const otherLogs = existingLogs.filter(log => {
+          const d = log.todo_date;
+          if (end) {
+            return !(d >= start && d <= end);
+          } else {
+            return d !== start;
+          }
+        });
+        return [...otherLogs, ...fetchedLogs];
+      };
+
+      // Helper for processing global tasks
+      const processTaskForGlobalTasks = (tRaw: any) => {
+        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) =>
+          self.findIndex((s: any) => s.id === sub.id) === index
+        );
+        const task = { ...tRaw, subtasks: uniqueSubs };
+        
+        const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
+        const projName = task.project_name || '';
+        const tagName = task.tag_name || '';
+        const teamName = task.team_name || firstTeamName;
+
+        const noteText = task.note || '';
+        const taskHistory = task.history || [];
+
+        const sub_tasks = (task.subtasks || []).map((st: any) => ({
+          id: st.id,
+          content: st.content,
+          assignee: st.assignee,
+          est_time: st.est_time || st.estimated_minutes || 0
+        }));
+        const meta = {
+          project_name: projName,
+          team_name: teamName,
+          tag_name: tagName,
+          note: noteText,
+          sub_tasks,
+          versions: taskHistory
+        };
+        const completions: Record<string, any> = {};
+
+        const uniqueDates = Array.from(new Set([
+          ...(task.task_logs || []).map((l: any) => l.todo_date),
+          ...(task.subtask_logs || []).map((l: any) => l.todo_date)
+        ]));
+
+        uniqueDates.forEach((todoDate: string) => {
+          const tLog = (task.task_logs || []).find((l: any) => l.todo_date === todoDate);
+          
+          let todo_status: 'NEW' | 'DONE' | 'SKIPPED' = 'NEW';
+          if (tLog) {
+            const normalizedStatus = (tLog.status || '').toUpperCase();
+            if (normalizedStatus === 'DONE' || normalizedStatus === 'SUBMITTED') {
+              todo_status = 'DONE';
+            } else if (normalizedStatus === 'SKIPPED') {
+              todo_status = 'SKIPPED';
+            }
+          }
+
+          const sub_tasks_mapped = (task.subtasks || []).map((st: any) => {
+            const stLog = (task.subtask_logs || []).find(
+              (sl: any) => sl.subtask_id === st.id && sl.todo_date === todoDate
+            );
+            let sub_status: 'New' | 'Done' | 'Skipped' = 'New';
+            if (stLog) {
+              const sUpper = (stLog.status || '').toUpperCase();
+              if (sUpper === 'DONE' || sUpper === 'SUBMITTED' || stLog.is_completed) {
+                sub_status = 'Done';
+              } else if (sUpper === 'SKIPPED') {
+                sub_status = 'Skipped';
+              }
+            }
+            const matchedEst = stLog ? (stLog.est_time !== undefined && stLog.est_time !== null ? stLog.est_time : stLog.estimated_minutes) : undefined;
+            const matchedAct = stLog ? (stLog.actual_time !== undefined && stLog.actual_time !== null ? stLog.actual_time : stLog.actual_minutes) : undefined;
+            const resolvedAct = (sub_status === 'New' && (matchedAct === 0 || matchedAct === undefined || matchedAct === null)) 
+              ? undefined 
+              : (matchedAct !== undefined && matchedAct !== null ? matchedAct : 0);
+
+            return {
+              id: st.id,
+              content: st.content,
+              name: st.content,
+              assignee: st.assignee,
+              est_time: st.est_time || st.estimated_minutes || 0,
+              actual_time: resolvedAct,
+              sub_status
+            };
+          });
+
+          if (!tLog && sub_tasks_mapped.length > 0) {
+            const allDone = sub_tasks_mapped.every((s: any) => s.sub_status === 'Done');
+            const allSkipped = sub_tasks_mapped.every((s: any) => s.sub_status === 'Skipped');
+            if (allDone) {
+              todo_status = 'DONE';
+            } else if (allSkipped) {
+              todo_status = 'SKIPPED';
+            }
+          }
+
+          const actual_time = tLog 
+            ? (tLog.actual_time !== undefined ? tLog.actual_time : tLog.actual_minutes || 0) 
+            : sub_tasks_mapped.reduce((sum: number, s: any) => sum + (s.sub_status === 'Done' ? (s.actual_time || 0) : 0), 0);
+
+          completions[todoDate] = {
+            todo_status,
+            actual_time,
+            sub_tasks: sub_tasks_mapped
+          };
+        });
+
+        const enrichedMeta = {
+          ...meta,
+          completions
+        };
+
+        const resolvedTaskName = task.task_name || task.title || '';
+        const resolvedType = task.type || task.task_type || 'DAILY';
+
+        const assignees = Array.from(new Set(
+          (task.subtasks || []).map((st: any) => st.assignee).filter(Boolean)
+        ));
+
+        return {
+          ...task,
+          assignees,
+          description: JSON.stringify(enrichedMeta),
+          task_name: resolvedTaskName,
+          title: resolvedTaskName,
+          type: resolvedType,
+          task_type: resolvedType
+        };
+      };
+
+      // Helper for processing daily tasks
+      const processTaskForDailyTasks = (task: any, taskLogs: any[], subtaskLogs: any[]) => {
+        const uniqueSubs = (task.subtasks || []).filter((sub: any, index: number, self: any[]) =>
+          self.findIndex((s: any) => s.id === sub.id) === index
+        );
+        const taskEnforced = { ...task, subtasks: uniqueSubs };
+        
+        const firstTeamName = taskEnforced.subtasks?.find((s: any) => s.team_name)?.team_name || '';
+        const projName = taskEnforced.project_name || '';
+        const tagName = taskEnforced.tag_name || '';
+        const teamName = taskEnforced.team_name || firstTeamName;
+
+        const noteText = taskEnforced.note || '';
+        const taskHistory = taskEnforced.history || [];
+        const meta = {
+          project_name: projName,
+          team_name: teamName,
+          tag_name: tagName,
+          note: noteText,
+          versions: taskHistory
+        };
+
+        const subtasksWithLogs = (taskEnforced.subtasks || []).map((subtask: any) => {
+          const matchedSubtaskLogs = subtaskLogs.filter((log: any) => log.subtask_id === subtask.id);
+          const mappedLogs = matchedSubtaskLogs.map((log: any) => ({
+            ...log,
+            est_time: log.est_time !== undefined && log.est_time !== null ? log.est_time : log.estimated_minutes,
+            actual_time: log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : log.actual_minutes
+          }));
+          return {
+            ...subtask,
+            est_time: subtask.est_time !== undefined && subtask.est_time !== null ? subtask.est_time : subtask.estimated_minutes,
+            name: subtask.name || subtask.content,
+            subtask_logs: mappedLogs
+          };
+        });
+
+        const resolvedTaskName = taskEnforced.task_name || taskEnforced.title || '';
+        const resolvedType = taskEnforced.type || taskEnforced.task_type || 'DAILY';
+
+        const assignees = Array.from(new Set(
+          (subtasksWithLogs || []).map((s: any) => s.assignee).filter(Boolean)
+        ));
+
+        return {
+          ...taskEnforced,
+          assignees,
+          description: JSON.stringify(meta),
+          task_name: resolvedTaskName,
+          title: resolvedTaskName,
+          type: resolvedType,
+          task_type: resolvedType,
+          subtasks: subtasksWithLogs,
+          task_logs: taskLogs,
+          subtask_logs: subtaskLogs
+        };
+      };
+
+      // 3. MERGE logical updates for standard 'tasks' state
+      const processedGlobalUpdates = (updatedTasksRaw || []).map((dbTask: any) => {
+        const taskId = dbTask.id;
+        const taskLogsForThisTask = taskLogsData.filter((log: any) => log.task_id === taskId);
+        const subtaskLogsForThisTask = subtaskLogsData.filter((log: any) => log.task_id === taskId);
+
+        const mergedTaskLogs = mergeLogs(dbTask.task_logs || [], taskLogsForThisTask, startDate, endDate);
+        const mergedSubtaskLogs = mergeLogs(dbTask.subtask_logs || [], subtaskLogsForThisTask, startDate, endDate);
+
+        const taskToProcess = {
+          ...dbTask,
+          task_logs: mergedTaskLogs,
+          subtask_logs: mergedSubtaskLogs
+        };
+
+        return processTaskForGlobalTasks(taskToProcess);
+      });
+
+      const processedDailyUpdates = (updatedTasksRaw || []).map((dbTask: any) => {
+        const taskId = dbTask.id;
+        const taskLogsForThisTask = taskLogsData.filter((log: any) => log.task_id === taskId);
+        const subtaskLogsForThisTask = subtaskLogsData.filter((log: any) => log.task_id === taskId);
+
+        return processTaskForDailyTasks(dbTask, taskLogsForThisTask, subtaskLogsForThisTask);
+      });
+
+      const processedGlobalMap = new Map();
+      processedGlobalUpdates.forEach((task: any) => {
+        processedGlobalMap.set(task.id, task);
+      });
+
+      const processedDailyMap = new Map();
+      processedDailyUpdates.forEach((task: any) => {
+        processedDailyMap.set(task.id, task);
+      });
+
+      const currentTasks = get().tasks;
+      const nextTasks: any[] = [];
+      const updatedTaskIdsInState = new Set<string>();
+
+      currentTasks.forEach((existingTask: any) => {
+        if (processedGlobalMap.has(existingTask.id)) {
+          nextTasks.push(processedGlobalMap.get(existingTask.id));
+          updatedTaskIdsInState.add(existingTask.id);
+        } else {
+          nextTasks.push(existingTask); // GIỮ NGUYÊN HOÀN TOÀN
+        }
+      });
+
+      processedGlobalUpdates.forEach((task: any) => {
+        if (!updatedTaskIdsInState.has(task.id)) {
+          nextTasks.push(task);
+        }
+      });
+
+      // 4. MERGE logical updates for 'dailyTasks' state
+      const currentDailyTasks = get().dailyTasks;
+      const nextDailyTasks: any[] = [];
+      const updatedDailyTaskIdsInState = new Set<string>();
+
+      currentDailyTasks.forEach((existingDailyTask: any) => {
+        if (processedDailyMap.has(existingDailyTask.id)) {
+          nextDailyTasks.push(processedDailyMap.get(existingDailyTask.id));
+          updatedDailyTaskIdsInState.add(existingDailyTask.id);
+        } else {
+          nextDailyTasks.push(existingDailyTask); // GIỮ NGUYÊN HOÀN TOÀN
+        }
+      });
+
+      processedDailyUpdates.forEach((task: any) => {
+        if (!updatedDailyTaskIdsInState.has(task.id)) {
+          nextDailyTasks.push(task);
+        }
+      });
+
+      set({
+        tasks: nextTasks,
+        dailyTasks: nextDailyTasks,
+        lastSyncTime: now
+      });
+      return true;
+    } catch (err: any) {
+      console.warn('[Sync] Delta sync failed, performing self-healing full synchronization fallback...', err);
+      if (err && typeof err === 'object') {
+        console.warn('Error Details - Message:', err.message, 'Code:', err.code, 'Details:', err.details, 'Hint:', err.hint);
+      }
+      try {
+        await get().fetchTasks(true);
+        await get().fetchMetadata(true);
+        const startDate = get().startDate;
+        if (startDate) {
+          await get().fetchDailyTasks(startDate, get().endDate, true, true);
+        }
+        set({ lastSyncTime: now });
+        return true;
+      } catch (fallbackErr) {
+        console.warn('[Sync] Full synchronization fallback also failed:', fallbackErr);
+        return false;
+      }
+    }
   }
+
 }));

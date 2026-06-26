@@ -13,66 +13,40 @@ import { toast } from 'sonner';
 type TabType = 'USERS' | 'PROJECTS' | 'TEAMS' | 'TAGS';
 
 export default function Settings() {
-  const { showConfirm, activeTab: globalActiveTab } = useAppStore();
+  const { 
+    showConfirm, 
+    activeTab: globalActiveTab,
+    usersFullList: users,
+    projectsFullList: projects,
+    teamsFullList: teams,
+    tagsFullList: tags,
+    metadataLoading: loading,
+    fetchMetadata
+  } = useAppStore();
+  
   const { currentUser, profile } = useAuthStore();
   const activeUser = currentUser || profile;
   const isAdmin = (activeUser?.role || 'user').toString().toLowerCase().trim() === 'admin' || activeUser?.role === 'Admin';
   const [activeTab, setActiveTab] = useState<TabType>('USERS');
 
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 15;
 
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab, searchQuery]);
-  
-  const [users, setUsers] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
-  const [teams, setTeams] = useState<any[]>([]);
-  const [tags, setTags] = useState<any[]>([]);
 
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [isUserCreateModalOpen, setIsUserCreateModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [
-        { data: usersData },
-        { data: projectsData },
-        { data: teamsData },
-        { data: tagsData }
-      ] = await Promise.all([
-        supabase.from('users').select('id, email, name, role, team_ids, status, created_at').order('created_at', { ascending: false }),
-        supabase.from('projects').select('*').order('created_at', { ascending: false }),
-        supabase.from('teams').select('*').order('created_at', { ascending: false }),
-        supabase.from('tags').select('*').order('created_at', { ascending: false })
-      ]);
-
-      setUsers(usersData || []);
-      setProjects(projectsData || []);
-      setTeams(teamsData || []);
-      setTags(tagsData || []);
-
-      // Đồng bộ hóa tức thì danh sách master data (users, teams, projects, tags) lên store toàn cục
-      useAppStore.getState().fetchMetadata(true);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Lắng nghe tab Cấu hình và ép buộc tải mới không dùng bộ nhớ cache (force = true)
   useEffect(() => {
     if (globalActiveTab !== 'SETTINGS') return;
-
-    fetchData();
-  }, [globalActiveTab]);
+    fetchMetadata(true);
+  }, [globalActiveTab, fetchMetadata]);
 
   const handleAdd = () => {
     if (activeTab === 'USERS' && isAdmin) {
@@ -110,7 +84,7 @@ export default function Settings() {
         const newName = formattedName;
         
         if (oldName && newName && oldName !== newName) {
-          // 1. If we are editing Teams, update user team_ids
+          // 1. Cập nhật mảng team_ids của người dùng nếu chỉnh sửa thông tin Teams
           if (activeTab === 'TEAMS') {
             const { data: allUsers } = await supabase.from('users').select('*');
             if (allUsers) {
@@ -125,7 +99,7 @@ export default function Settings() {
             }
           }
 
-          // 2. Direct RDBMS update on task and subtask fields based on activeTab (Projects, Teams, Tags)
+          // 2. Đồng bộ hóa trực tiếp trong RDBMS đến các trường text của Tasks/Subtasks
           if (activeTab === 'PROJECTS') {
             await supabase
               .from('tasks')
@@ -157,7 +131,17 @@ export default function Settings() {
         await logger.log('CREATE_MASTER_DATA', `Created item in ${tableName} named ${formattedName}`);
         toast.success(`Successfully created new ${tableName}!`);
       }
-      fetchData();
+
+      // Ép làm mới toàn diện hệ thống quản lý dữ liệu toàn cục
+      const state = useAppStore.getState();
+      await Promise.all([
+        state.fetchMetadata(true),
+        state.fetchTasks(true),
+        state.fetchApproveTasks(true)
+      ]);
+      if (state.startDate) {
+        await state.fetchDailyTasks(state.startDate, state.endDate, true);
+      }
     } catch (error: any) {
       toast.error(`Error saving ${tableName}: ${error.message}`);
     }
@@ -181,7 +165,15 @@ export default function Settings() {
 
       await logger.log('CREATE_USER', `Created new user ${data.email}`, { name: data.name, role: data.role });
       
-      fetchData();
+      const state = useAppStore.getState();
+      await Promise.all([
+        state.fetchMetadata(true),
+        state.fetchTasks(true),
+        state.fetchApproveTasks(true)
+      ]);
+      if (state.startDate) {
+        await state.fetchDailyTasks(state.startDate, state.endDate, true);
+      }
       toast.success("Staff added successfully!");
       setIsUserCreateModalOpen(false);
     } catch (err: any) {
@@ -197,7 +189,6 @@ export default function Settings() {
   const handleSaveUser = async (userId: string, data: { name?: string; role: string; status: string; teams: string[] }) => {
     const userToUpdate = users.find(u => u.id === userId);
     
-    // Safety check for Master email
     if (userToUpdate?.role?.toString().toLowerCase().trim() === 'master' && data.role.toUpperCase() !== 'MASTER') {
       toast.warning('Cannot downgrade the Master account role.');
       return;
@@ -210,7 +201,6 @@ export default function Settings() {
       const newName = data.name?.trim();
       
       if (oldName && newName && oldName !== newName) {
-        // Direct RDBMS update on subtasks table where assignee is located
         await supabase
           .from('subtasks')
           .update({ assignee: newName })
@@ -234,7 +224,16 @@ export default function Settings() {
       
       await logger.log('UPDATE_USER', `Updated user settings for ${userToUpdate?.email}`, { userId, updates: data });
       toast.success('Staff information updated successfully!');
-      fetchData();
+      
+      const state = useAppStore.getState();
+      await Promise.all([
+        state.fetchMetadata(true),
+        state.fetchTasks(true),
+        state.fetchApproveTasks(true)
+      ]);
+      if (state.startDate) {
+        await state.fetchDailyTasks(state.startDate, state.endDate, true);
+      }
     } catch (err: any) {
       console.error('[Settings] Full Error Object:', err);
       toast.error(`Error updating user: ${err.message || 'Unknown error'}`);
@@ -247,7 +246,6 @@ export default function Settings() {
       return;
     }
 
-    // Safety checks
     if (activeTab === 'USERS') {
       const uObj = users.find(u => u.id === id);
       if (uObj?.role?.toString().toLowerCase().trim() === 'master') {
@@ -257,7 +255,6 @@ export default function Settings() {
     }
 
     try {
-      // 1. Fetch all tasks to validate relationship rules
       const { data: activeTasks, error: taskErr } = await supabase
         .from('tasks')
         .select('*');
@@ -267,12 +264,11 @@ export default function Settings() {
         return;
       }
 
-      // Filter tasks where is_active is true or status is 'ON'
       const filteredActiveTasks = (activeTasks || []).filter(
         (t: any) => t.is_active === true || String(t.status || '').toUpperCase() === 'ON'
       );
 
-      // Validation Checks based on Tab Type
+      // Thực thi các điều kiện kiểm tra ràng buộc dữ liệu đầu cuối
       if (activeTab === 'USERS') {
         const userObj = users.find(u => u.id === id);
         if (userObj) {
@@ -377,7 +373,16 @@ export default function Settings() {
           if (error) throw error;
           await logger.log('DELETE_MASTER_DATA', `Deleted item from ${tableName}`, { id });
           toast.success("Data deleted successfully!");
-          fetchData();
+          
+          const state = useAppStore.getState();
+          await Promise.all([
+            state.fetchMetadata(true),
+            state.fetchTasks(true),
+            state.fetchApproveTasks(true)
+          ]);
+          if (state.startDate) {
+            await state.fetchDailyTasks(state.startDate, state.endDate, true);
+          }
         } catch (error: any) {
           toast.error(`Error deleting: ${error.message}`);
         }
@@ -401,7 +406,6 @@ export default function Settings() {
         return;
       }
 
-      setUsers(prev => prev.map(u => u.id === item.id ? { ...u, status: nextStatus } : u));
       try {
         const { error } = await supabase
           .from('users')
@@ -410,23 +414,23 @@ export default function Settings() {
         if (error) throw error;
         await logger.log('TOGGLE_ACTIVE', `Toggled user status to ${nextStatus} for ID: ${item.id}`);
         toast.success(`Successfully updated active status!`);
-        useAppStore.getState().fetchMetadata(true);
+        
+        const state = useAppStore.getState();
+        await Promise.all([
+          state.fetchMetadata(true),
+          state.fetchTasks(true),
+          state.fetchApproveTasks(true)
+        ]);
+        if (state.startDate) {
+          await state.fetchDailyTasks(state.startDate, state.endDate, true);
+        }
       } catch (err: any) {
-        setUsers(prev => prev.map(u => u.id === item.id ? { ...u, status: item.status } : u));
         toast.error(`Error toggling status: ${err.message}`);
       }
       return;
     }
 
     const nextActive = !item.is_active;
-
-    if (activeTab === 'PROJECTS') {
-      setProjects(prev => prev.map(p => p.id === item.id ? { ...p, is_active: nextActive } : p));
-    } else if (activeTab === 'TAGS') {
-      setTags(prev => prev.map(t => t.id === item.id ? { ...t, is_active: nextActive } : t));
-    } else if (activeTab === 'TEAMS') {
-      setTeams(prev => prev.map(t => t.id === item.id ? { ...t, is_active: nextActive } : t));
-    }
 
     try {
       const { error } = await supabase
@@ -438,48 +442,44 @@ export default function Settings() {
 
       await logger.log('TOGGLE_ACTIVE', `Toggled is_active to ${nextActive} in ${tableName} for ID: ${item.id}`);
       toast.success(`Active status updated!`);
-      useAppStore.getState().fetchMetadata(true);
-    } catch (error: any) {
-      if (activeTab === 'PROJECTS') {
-        setProjects(prev => prev.map(p => p.id === item.id ? { ...p, is_active: !nextActive } : p));
-      } else if (activeTab === 'TAGS') {
-        setTags(prev => prev.map(t => t.id === item.id ? { ...t, is_active: !nextActive } : t));
-      } else if (activeTab === 'TEAMS') {
-        setTeams(prev => prev.map(t => t.id === item.id ? { ...t, is_active: !nextActive } : t));
+      
+      const state = useAppStore.getState();
+      await Promise.all([
+        state.fetchMetadata(true),
+        state.fetchTasks(true),
+        state.fetchApproveTasks(true)
+      ]);
+      if (state.startDate) {
+        await state.fetchDailyTasks(state.startDate, state.endDate, true);
       }
+    } catch (error: any) {
       toast.error(`Error toggling active status: ${error.message}`);
     }
   };
 
-  const rawTabs = [
+  const visibleTabs = [
     { id: 'USERS', label: 'Users', icon: Users },
     { id: 'PROJECTS', label: 'Projects', icon: FolderKanban },
     { id: 'TEAMS', label: 'Teams', icon: ShieldCheck },
     { id: 'TAGS', label: 'Tags', icon: TagIcon },
   ];
 
-  const visibleTabs = rawTabs;
-
-  const getSortedUsers = (users: any[]) => {
+  const getSortedUsers = (items: any[]) => {
     const roleOrder: Record<string, number> = { 'master': 0, 'admin': 1, 'user': 2 };
     
-    return [...users].sort((a, b) => {
-      // 1. Status (Rightmost)
+    return [...items].sort((a, b) => {
       const statusA = (a.status || 'ACTIVE').toUpperCase();
       const statusB = (b.status || 'ACTIVE').toUpperCase();
-      if (statusA !== statusB) return statusA.localeCompare(statusB); // ACTIVE < INACTIVE
+      if (statusA !== statusB) return statusA.localeCompare(statusB);
 
-      // 2. Role
       const roleA = roleOrder[(a.role || 'user').toLowerCase()] ?? 3;
       const roleB = roleOrder[(b.role || 'user').toLowerCase()] ?? 3;
       if (roleA !== roleB) return roleA - roleB;
 
-      // 3. Teams
       const teamsA = (Array.isArray(a.team_ids) ? a.team_ids : []).join(',');
       const teamsB = (Array.isArray(b.team_ids) ? b.team_ids : []).join(',');
       if (teamsA !== teamsB) return teamsA.localeCompare(teamsB);
 
-      // 4. Name / Email (Leftmost)
       const nameA = (a.name || a.email || '').toLowerCase();
       const nameB = (b.name || b.email || '').toLowerCase();
       return nameA.localeCompare(nameB);
@@ -509,7 +509,7 @@ export default function Settings() {
     return (item.name || '').toLowerCase().includes(term);
   });
 
-  const filteredTags = tags.filter(item => {
+  const filteredPagesTags = tags.filter(item => {
     const term = searchQuery.trim().toLowerCase();
     return (item.name || '').toLowerCase().includes(term);
   });
@@ -523,7 +523,7 @@ export default function Settings() {
       case 'TEAMS':
         return getSortedList(filteredTeams);
       case 'TAGS':
-        return getSortedList(filteredTags);
+        return getSortedList(filteredPagesTags);
       default:
         return [];
     }
@@ -652,14 +652,14 @@ export default function Settings() {
                         <div className="flex gap-1 flex-nowrap overflow-hidden items-center">
                           {(() => {
                             const rawTeams = Array.isArray(user.team_ids) ? user.team_ids : Array.isArray(user.teams) ? user.teams : [];
-                            const teams = rawTeams
+                            const userTeamsList = rawTeams
                               .map((t: any) => t?.toString().replace(/[\[\]"]/g, '').trim())
                               .filter((t: string) => t && t !== "");
                             
-                            if (teams.length === 0) return <span className="text-slate-400 italic text-[11px]">No team</span>;
+                            if (userTeamsList.length === 0) return <span className="text-slate-400 italic text-[11px]">No team</span>;
                             
-                            const showTeams = teams.slice(0, 2);
-                            const remainingCount = teams.length - 2;
+                            const showTeams = userTeamsList.slice(0, 2);
+                            const remainingCount = userTeamsList.length - 2;
                             
                             return (
                               <>
@@ -669,7 +669,7 @@ export default function Settings() {
                                   </span>
                                 ))}
                                 {remainingCount > 0 && (
-                                  <span className="px-1.5 py-0.5 bg-slate-200 border border-slate-300 text-slate-600 rounded text-xs font-semibold shrink-0" title={teams.slice(2).join(', ')}>
+                                  <span className="px-1.5 py-0.5 bg-slate-200 border border-slate-300 text-slate-600 rounded text-xs font-semibold shrink-0" title={userTeamsList.slice(2).join(', ')}>
                                     +{remainingCount}
                                   </span>
                                 )}
@@ -759,8 +759,16 @@ export default function Settings() {
                   {paginatedItems.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50/40 group transition-all h-[46px]">
                       <td className="px-6 py-1 font-semibold text-slate-800 truncate">{item.name}</td>
-                      <td className="px-6 py-1 text-slate-400 font-medium text-xs">{(() => { const d = new Date(item.created_at); if (isNaN(d.getTime())) return ''; const day = String(d.getDate()).padStart(2, '0'); const month = String(d.getMonth() + 1).padStart(2, '0'); const year = d.getFullYear(); return `${day}/${month}/${year}`; })()}</td>
-                      
+                      <td className="px-6 py-1 text-slate-400 font-medium text-xs">
+                        {(() => { 
+                          const d = new Date(item.created_at); 
+                          if (isNaN(d.getTime())) return ''; 
+                          const day = String(d.getDate()).padStart(2, '0'); 
+                          const month = String(d.getMonth() + 1).padStart(2, '0'); 
+                          const year = d.getFullYear(); 
+                          return `${day}/${month}/${year}`; 
+                        })()}
+                      </td>
                       <td className="px-6 py-1 text-right pr-12">
                         <div className="flex items-center justify-end gap-3 font-sans">
                           <button 
@@ -810,6 +818,7 @@ export default function Settings() {
         </table>
       </div>
 
+      {/* Footer / Pagination Bar */}
       <div className="px-6 h-8 flex items-center justify-between border-t border-slate-100 bg-white shrink-0 selection:bg-none font-sans py-0">
         <span className="text-[11px] font-medium text-slate-400 font-mono">
           Total: {totalItemsCount} records
@@ -854,7 +863,7 @@ export default function Settings() {
         </div>
         <div className="w-20 hidden md:block"></div>
       </div>
- 
+
       {/* Modals */}
       <MasterDataModal
         isOpen={isMasterModalOpen}
