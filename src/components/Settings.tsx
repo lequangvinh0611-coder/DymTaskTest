@@ -58,6 +58,9 @@ export default function Settings() {
       setProjects(projectsData || []);
       setTeams(teamsData || []);
       setTags(tagsData || []);
+
+      // Đồng bộ hóa tức thì danh sách master data (users, teams, projects, tags) lên store toàn cục
+      useAppStore.getState().fetchMetadata(true);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {

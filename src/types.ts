@@ -402,6 +402,9 @@ export const useAppStore = create<AppState>((set, get) => ({
             }
             const matchedEst = stLog ? (stLog.est_time !== undefined && stLog.est_time !== null ? stLog.est_time : stLog.estimated_minutes) : undefined;
             const matchedAct = stLog ? (stLog.actual_time !== undefined && stLog.actual_time !== null ? stLog.actual_time : stLog.actual_minutes) : undefined;
+            const resolvedAct = (sub_status === 'New' && (matchedAct === 0 || matchedAct === undefined || matchedAct === null)) 
+              ? undefined 
+              : (matchedAct !== undefined && matchedAct !== null ? matchedAct : 0);
 
             return {
               id: st.id,
@@ -409,7 +412,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               name: st.content,
               assignee: st.assignee,
               est_time: st.est_time || st.estimated_minutes || 0,
-              actual_time: matchedAct || 0,
+              actual_time: resolvedAct,
               sub_status
             };
           });
@@ -459,6 +462,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         tasksLoaded: true,
         tasksLoading: false
       });
+
+      // Tự động đồng bộ hóa dailyTasks khi fetchTasks(true) được gọi để tránh lệch dữ liệu giữa các tab
+      if (force && get().startDate) {
+        get().fetchDailyTasks(get().startDate, get().endDate, true);
+      }
     } catch (err) {
       console.error('Error fetching global tasks:', err);
       set({ tasksLoading: false });

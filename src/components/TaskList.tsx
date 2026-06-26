@@ -773,7 +773,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 content: log.content || '',
                 assignee: log.assignee || '',
                 est_time: log.est_time !== undefined && log.est_time !== null ? log.est_time : (log.estimated_minutes !== undefined ? log.estimated_minutes : 0),
-                actual_time: log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : (log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? (log.est_time || log.estimated_minutes || 0) : 0)),
+                actual_time: (sub_status === 'New' && (log.actual_time === 0 || log.actual_time === undefined || log.actual_time === null))
+                  ? undefined
+                  : (log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : (log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? (log.est_time || log.estimated_minutes || 0) : 0))),
                 sub_status,
                 team_name: log.team_name || ''
               };
@@ -797,7 +799,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               } else if (sub_status === 'Skipped') {
                 resolved_actual = 0;
               } else {
-                resolved_actual = log_actual; // undefined when no log
+                resolved_actual = (log_actual === 0 || log_actual === undefined || log_actual === null) ? undefined : log_actual;
               }
 
               return {
@@ -1399,7 +1401,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           sub_tasks: (openedTask.sub_tasks || []).map(st => ({
             ...st,
             sub_status: 'New',
-            actual_time: 0
+            actual_time: undefined
           }))
         });
       }
@@ -3061,7 +3063,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                                   type="number"
                                   min={0}
                                   placeholder={String(sub.est_time || 0)}
-                                  value={sub.actual_time !== undefined ? sub.actual_time : ''}
+                                  value={(sub.actual_time !== undefined && sub.actual_time !== null && (sub.sub_status !== 'New' || sub.actual_time !== 0)) ? sub.actual_time : ''}
                                   className="w-12 h-6 px-1 text-center bg-slate-50 border border-slate-200 rounded font-medium text-slate-800 focus:outline-none focus:bg-white text-xs font-mono"
                                   onChange={(e) => {
                                     const val = e.target.value;
