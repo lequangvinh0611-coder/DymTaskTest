@@ -159,7 +159,7 @@ ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- 9. Task Access Policy
--- Chỉ những user có role = 'master' hoặc email nằm trong danh sách assignees của task đó mới được quyền xem/sửa.
+-- Chỉ những user có role = 'master' hoặc là assignee trong các subtasks của task đó mới được quyền xem/sửa.
 
 -- Helper function to get current user role
 DROP FUNCTION IF EXISTS public.get_current_user_role();
@@ -169,13 +169,58 @@ RETURNS text AS $$
 $$ LANGUAGE sql SECURITY DEFINER;
 
 -- Policy for tasks: SELECT, INSERT, UPDATE, DELETE
+DROP POLICY IF EXISTS "Task Access Policy" ON public.tasks;
 CREATE POLICY "Task Access Policy" ON public.tasks
 FOR ALL
 USING (
   public.get_current_user_role() = 'master' 
   OR 
-  (auth.jwt() ->> 'email') = ANY(assignees)
+  EXISTS (
+    SELECT 1 FROM public.subtasks s
+    WHERE s.task_id = public.tasks.id
+    AND (
+      s.assignee = (auth.jwt() ->> 'email')
+      OR
+      s.assignee = (SELECT name FROM public.users WHERE id = auth.uid())
+    )
+  )
 );
+
+-- Policies for projects
+DROP POLICY IF EXISTS "Allow read to everyone" ON public.projects;
+CREATE POLICY "Allow read to everyone" ON public.projects FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow master to insert" ON public.projects;
+CREATE POLICY "Allow master to insert" ON public.projects FOR INSERT WITH CHECK (public.check_is_master());
+DROP POLICY IF EXISTS "Allow master to update" ON public.projects;
+CREATE POLICY "Allow master to update" ON public.projects FOR UPDATE USING (public.check_is_master());
+DROP POLICY IF EXISTS "Allow master to delete" ON public.projects;
+CREATE POLICY "Allow master to delete" ON public.projects FOR DELETE USING (public.check_is_master());
+
+-- Policies for teams
+DROP POLICY IF EXISTS "Allow read to everyone" ON public.teams;
+CREATE POLICY "Allow read to everyone" ON public.teams FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow master to insert" ON public.teams;
+CREATE POLICY "Allow master to insert" ON public.teams FOR INSERT WITH CHECK (public.check_is_master());
+DROP POLICY IF EXISTS "Allow master to update" ON public.teams;
+CREATE POLICY "Allow master to update" ON public.teams FOR UPDATE USING (public.check_is_master());
+DROP POLICY IF EXISTS "Allow master to delete" ON public.teams;
+CREATE POLICY "Allow master to delete" ON public.teams FOR DELETE USING (public.check_is_master());
+
+-- Policies for tags
+DROP POLICY IF EXISTS "Allow read to everyone" ON public.tags;
+CREATE POLICY "Allow read to everyone" ON public.tags FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow master to insert" ON public.tags;
+CREATE POLICY "Allow master to insert" ON public.tags FOR INSERT WITH CHECK (public.check_is_master());
+DROP POLICY IF EXISTS "Allow master to update" ON public.tags;
+CREATE POLICY "Allow master to update" ON public.tags FOR UPDATE USING (public.check_is_master());
+DROP POLICY IF EXISTS "Allow master to delete" ON public.tags;
+CREATE POLICY "Allow master to delete" ON public.tags FOR DELETE USING (public.check_is_master());
+
+-- Policies for audit_logs
+DROP POLICY IF EXISTS "Allow read to everyone" ON public.audit_logs;
+CREATE POLICY "Allow read to everyone" ON public.audit_logs FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow insert to everyone" ON public.audit_logs;
+CREATE POLICY "Allow insert to everyone" ON public.audit_logs FOR INSERT WITH CHECK (true);
 
 -- 10. Policies for users table
 -- We separate SELECT to avoid recursion in subqueries.

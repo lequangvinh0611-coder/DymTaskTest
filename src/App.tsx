@@ -79,11 +79,27 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => {
             debouncedFetchTemplatesAndDaily();
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, () => {
-            debouncedFetchDailyOnly();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, (payload: any) => {
+            const state = useAppStore.getState();
+            const targetDate = payload.new?.todo_date || payload.old?.todo_date;
+            if (targetDate && state.startDate && state.endDate) {
+              if (targetDate >= state.startDate && targetDate <= state.endDate) {
+                debouncedFetchDailyOnly();
+              }
+            } else {
+              debouncedFetchDailyOnly();
+            }
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, () => {
-            debouncedFetchDailyOnly();
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, (payload: any) => {
+            const state = useAppStore.getState();
+            const targetDate = payload.new?.todo_date || payload.old?.todo_date;
+            if (targetDate && state.startDate && state.endDate) {
+              if (targetDate >= state.startDate && targetDate <= state.endDate) {
+                debouncedFetchDailyOnly();
+              }
+            } else {
+              debouncedFetchDailyOnly();
+            }
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
             debouncedFetchMetadata();

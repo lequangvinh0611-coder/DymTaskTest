@@ -270,7 +270,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setDates: (start: string, end: string) => set({ startDate: start, endDate: end }),
 
   fetchMetadata: async (force = false) => {
-    if (get().metadataLoading) return;
+    if (!force && get().metadataLoading) return;
     if (get().metadataLoaded && !force) return;
     set({ metadataLoading: true });
     try {
@@ -318,7 +318,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchTasks: async (force = false) => {
-    if (get().tasksLoading) return;
+    if (!force && get().tasksLoading) return;
     if (get().tasksLoaded && !force) return;
     set({ tasksLoading: true });
     try {
@@ -447,8 +447,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         const resolvedTaskName = task.task_name || task.title || '';
         const resolvedType = task.type || task.task_type || 'DAILY';
 
+        const assignees = Array.from(new Set(
+          (task.subtasks || []).map((st: any) => st.assignee).filter(Boolean)
+        ));
+
         return {
           ...task,
+          assignees,
           description: JSON.stringify(enrichedMeta),
           task_name: resolvedTaskName,
           title: resolvedTaskName,
@@ -467,14 +472,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (force && get().startDate) {
         get().fetchDailyTasks(get().startDate, get().endDate, true);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching global tasks:', err);
+      if (err && typeof err === 'object') {
+        console.error('Error Details - Message:', err.message, 'Code:', err.code, 'Details:', err.details, 'Hint:', err.hint);
+      }
       set({ tasksLoading: false });
     }
   },
 
   fetchApproveTasks: async (force = false) => {
-    if (get().approveTasksLoading) return;
+    if (!force && get().approveTasksLoading) return;
     if (get().approveTasksLoaded && !force) return;
     set({ approveTasksLoading: true });
     try {
@@ -496,7 +504,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchDailyTasks: async (startDateString: string, endDateString?: string, isSilent = false) => {
-    if (get().dailyTasksLoading) return;
+    if (!isSilent && get().dailyTasksLoading) return;
     set({ 
       dailyTasksLoading: true, 
       ...(isSilent ? {} : { dailyTasksLoaded: false })
@@ -577,8 +585,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         const resolvedTaskName = task.task_name || task.title || '';
         const resolvedType = task.type || task.task_type || 'DAILY';
 
+        const assignees = Array.from(new Set(
+          (subtasksWithLogs || []).map((s: any) => s.assignee).filter(Boolean)
+        ));
+
         return {
           ...task,
+          assignees,
           description: JSON.stringify(meta),
           task_name: resolvedTaskName,
           title: resolvedTaskName,
@@ -595,8 +608,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         dailyTasksLoaded: true,
         dailyTasksLoading: false
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching daily tasks:', err);
+      if (err && typeof err === 'object') {
+        console.error('Error Details - Message:', err.message, 'Code:', err.code, 'Details:', err.details, 'Hint:', err.hint);
+      }
       set({ dailyTasksLoading: false });
     }
   },
