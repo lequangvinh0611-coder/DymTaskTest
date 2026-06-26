@@ -72,29 +72,6 @@ export default function Settings() {
     if (globalActiveTab !== 'SETTINGS') return;
 
     fetchData();
-
-    // Helper to debounce callbacks for Postgres changes to prevent redundant rapid fetch storms
-    const debounce = (func: () => void, wait: number) => {
-      let timeout: any;
-      return () => {
-        clearTimeout(timeout);
-        timeout = setTimeout(func, wait);
-      };
-    };
-
-    const debouncedFetchData = debounce(fetchData, 300);
-
-    // Set up real-time subscriptions
-    const channel = supabase.channel('settings_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => debouncedFetchData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => debouncedFetchData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => debouncedFetchData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tags' }, () => debouncedFetchData())
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [globalActiveTab]);
 
   const handleAdd = () => {
@@ -433,6 +410,7 @@ export default function Settings() {
         if (error) throw error;
         await logger.log('TOGGLE_ACTIVE', `Toggled user status to ${nextStatus} for ID: ${item.id}`);
         toast.success(`Successfully updated active status!`);
+        useAppStore.getState().fetchMetadata(true);
       } catch (err: any) {
         setUsers(prev => prev.map(u => u.id === item.id ? { ...u, status: item.status } : u));
         toast.error(`Error toggling status: ${err.message}`);
@@ -460,6 +438,7 @@ export default function Settings() {
 
       await logger.log('TOGGLE_ACTIVE', `Toggled is_active to ${nextActive} in ${tableName} for ID: ${item.id}`);
       toast.success(`Active status updated!`);
+      useAppStore.getState().fetchMetadata(true);
     } catch (error: any) {
       if (activeTab === 'PROJECTS') {
         setProjects(prev => prev.map(p => p.id === item.id ? { ...p, is_active: !nextActive } : p));
