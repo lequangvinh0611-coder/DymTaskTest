@@ -1344,38 +1344,38 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     }
 
     try {
-      // 1. Update task log to NEW and actual_time to 0
+      // 1. Update task log to NEW (actual_time kept as-is)
       const { error: logErr } = await supabase
         .from('task_logs')
-        .update({ status: 'NEW', actual_time: 0 })
+        .update({ status: 'NEW' })
         .eq('task_id', task.id)
         .eq('todo_date', task.todo_date);
 
       if (logErr) throw logErr;
 
-      // 2. Update subtask logs to NEW, is_completed = false, actual_time to 0
+      // 2. Update subtask logs to NEW, is_completed = false (actual_time kept as-is)
       const { error: subLogsErr } = await supabase
         .from('subtask_logs')
-        .update({ status: 'NEW', is_completed: false, actual_time: 0 })
+        .update({ status: 'NEW', is_completed: false })
         .eq('task_id', task.id)
         .eq('todo_date', task.todo_date);
 
       if (subLogsErr) throw subLogsErr;
 
-      // 3. Update dailyTasks locally in useAppStore (update logs instead of deleting them)
+      // 3. Update dailyTasks locally in useAppStore (update logs keeping actual_time as-is)
       useAppStore.setState(state => {
         const nextDailyTasks = state.dailyTasks.map(t => {
           if (t.id === task.id) {
             const logs = (t.task_logs || []).map((l: any) => {
               if (l.todo_date === task.todo_date) {
-                return { ...l, status: 'NEW', actual_time: 0 };
+                return { ...l, status: 'NEW' };
               }
               return l;
             });
             
             const globalSubLogs = (t.subtask_logs || []).map((sl: any) => {
               if (sl.todo_date === task.todo_date) {
-                return { ...sl, status: 'NEW', is_completed: false, actual_time: 0 };
+                return { ...sl, status: 'NEW', is_completed: false };
               }
               return sl;
             });
@@ -1383,7 +1383,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             const nextSubtasks = (t.subtasks || []).map((subItem: any) => {
               const subLogs = (subItem.subtask_logs || []).map((sl: any) => {
                 if (sl.todo_date === task.todo_date) {
-                  return { ...sl, status: 'NEW', is_completed: false, actual_time: 0 };
+                  return { ...sl, status: 'NEW', is_completed: false };
                 }
                 return sl;
               });
@@ -1408,8 +1408,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
           todo_status: 'NEW',
           sub_tasks: (openedTask.sub_tasks || []).map(st => ({
             ...st,
-            sub_status: 'New',
-            actual_time: undefined
+            sub_status: 'New'
           }))
         });
       }
@@ -1604,11 +1603,16 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     const calculated_est_time = updatedSubTasks.reduce((sum, sub) => sum + (Number(sub.est_time) || 0), 0);
     const calculated_actual_time = updatedSubTasks.reduce((sum, sub) => sum + (sub.sub_status === 'Done' ? (Number(sub.actual_time) || 0) : 0), 0);
 
+    const hasNewSubTask = updatedSubTasks.some(sub => (sub.sub_status || 'New') === 'New');
+    const allSkipped = updatedSubTasks.length > 0 && updatedSubTasks.every(sub => (sub.sub_status || 'New') === 'Skipped');
+    const newStatus = allSkipped ? 'SKIPPED' : (hasNewSubTask ? 'NEW' : 'DONE');
+
     const updatedTask = {
       ...openedTask,
       sub_tasks: updatedSubTasks,
       est_time: calculated_est_time,
-      actual_time: calculated_actual_time
+      actual_time: calculated_actual_time,
+      todo_status: newStatus
     };
 
     setOpenedTask(updatedTask);
@@ -1783,6 +1787,142 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     } catch (err: any) {
       console.error('Error saving task edits on close:', err);
       toast.error(`Failed to save changes: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Save status directly for tasks with no subtasks
+  const saveTaskStatusDirectly = async (taskToSave: VirtualTask, nextStatus: 'DONE' | 'SKIPPED') => {
+    try {
+      const completedBy = activeUser?.name || activeUser?.email || 'Unknown';
+      const actualTimeVal = taskToSave.actual_time !== undefined && taskToSave.actual_time !== null ? taskToSave.actual_time : (taskToSave.est_time || 0);
+
+      await supabase
+        .from('task_logs')
+        .upsert({
+          task_id: taskToSave.id,
+          todo_date: taskToSave.todo_date,
+          status: nextStatus,
+          updated_by: completedBy,
+          title: taskToSave.title || '',
+          project_name: taskToSave.project_name || '',
+          tag_name: taskToSave.tag_name || '',
+          deadline_time: taskToSave.deadline_time || '17:00',
+          deadline_days: taskToSave.deadline_days || '',
+          task_type: taskToSave.task_type || 'DAILY',
+          est_time: taskToSave.est_time || 0,
+          actual_time: actualTimeVal
+        }, {
+          onConflict: 'task_id,todo_date'
+        });
+
+      // Update dailyTasks locally in useAppStore
+      useAppStore.setState(state => {
+        const nextDailyTasks = state.dailyTasks.map(t => {
+          if (t.id === taskToSave.id) {
+            const logs = [...(t.task_logs || [])];
+            const existingLogIndex = logs.findIndex((l: any) => l.todo_date === taskToSave.todo_date);
+            const taskLogPayload = {
+              task_id: taskToSave.id,
+              todo_date: taskToSave.todo_date,
+              status: nextStatus,
+              updated_by: completedBy,
+              title: taskToSave.title || '',
+              project_name: taskToSave.project_name || '',
+              tag_name: taskToSave.tag_name || '',
+              deadline_time: taskToSave.deadline_time || '17:00',
+              deadline_days: taskToSave.deadline_days || '',
+              task_type: taskToSave.task_type || 'DAILY',
+              est_time: taskToSave.est_time || 0,
+              actual_time: actualTimeVal
+            };
+            if (existingLogIndex >= 0) {
+              logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
+            } else {
+              logs.push(taskLogPayload);
+            }
+            return {
+              ...t,
+              task_logs: logs
+            };
+          }
+          return t;
+        });
+        return { dailyTasks: nextDailyTasks };
+      });
+
+      await checkAndToggleOnetimeTemplateStatus(taskToSave.id);
+      await logger.log('UPDATE_TASK_STATUS', `Updated task status [${getDisplayId(taskToSave)}]: ${taskToSave.title} to ${nextStatus}`, { taskId: taskToSave.id });
+      toast.success(`Task marked as ${nextStatus === 'DONE' ? 'Done' : 'Skipped'}!`);
+      safeBroadcast('task_logs_changed', { todo_date: taskToSave.todo_date });
+    } catch (err: any) {
+      console.error('Error updating task status:', err);
+      toast.error(`Failed to update task status: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Save actual time directly for tasks with no subtasks
+  const saveTaskActualTimeDirectly = async (taskToSave: VirtualTask, actualTime: number) => {
+    try {
+      const completedBy = activeUser?.name || activeUser?.email || 'Unknown';
+      const currentStatus = taskToSave.todo_status || 'NEW';
+
+      await supabase
+        .from('task_logs')
+        .upsert({
+          task_id: taskToSave.id,
+          todo_date: taskToSave.todo_date,
+          status: currentStatus,
+          updated_by: completedBy,
+          title: taskToSave.title || '',
+          project_name: taskToSave.project_name || '',
+          tag_name: taskToSave.tag_name || '',
+          deadline_time: taskToSave.deadline_time || '17:00',
+          deadline_days: taskToSave.deadline_days || '',
+          task_type: taskToSave.task_type || 'DAILY',
+          est_time: taskToSave.est_time || 0,
+          actual_time: actualTime
+        }, {
+          onConflict: 'task_id,todo_date'
+        });
+
+      // Update dailyTasks locally in useAppStore
+      useAppStore.setState(state => {
+        const nextDailyTasks = state.dailyTasks.map(t => {
+          if (t.id === taskToSave.id) {
+            const logs = [...(t.task_logs || [])];
+            const existingLogIndex = logs.findIndex((l: any) => l.todo_date === taskToSave.todo_date);
+            const taskLogPayload = {
+              task_id: taskToSave.id,
+              todo_date: taskToSave.todo_date,
+              status: currentStatus,
+              updated_by: completedBy,
+              title: taskToSave.title || '',
+              project_name: taskToSave.project_name || '',
+              tag_name: taskToSave.tag_name || '',
+              deadline_time: taskToSave.deadline_time || '17:00',
+              deadline_days: taskToSave.deadline_days || '',
+              task_type: taskToSave.task_type || 'DAILY',
+              est_time: taskToSave.est_time || 0,
+              actual_time: actualTime
+            };
+            if (existingLogIndex >= 0) {
+              logs[existingLogIndex] = { ...logs[existingLogIndex], ...taskLogPayload };
+            } else {
+              logs.push(taskLogPayload);
+            }
+            return {
+              ...t,
+              task_logs: logs
+            };
+          }
+          return t;
+        });
+        return { dailyTasks: nextDailyTasks };
+      });
+
+      safeBroadcast('task_logs_changed', { todo_date: taskToSave.todo_date });
+    } catch (err: any) {
+      console.error('Error saving task actual time:', err);
     }
   };
 
@@ -2849,23 +2989,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                     {/* Direct action triggers */}
                     <td className="px-3 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                       {(() => {
-                        const hasNewSubTask = (task.sub_tasks || []).some(sub => (sub.sub_status || 'New') === 'New');
-                        if (task.todo_status === 'NEW') {
-                          return (
-                            <button
-                              onClick={() => handleDirectSubmit(task)}
-                              disabled={hasNewSubTask}
-                              className={`px-2.5 h-6 transition-all text-white rounded-md text-xs font-medium ${
-                                hasNewSubTask
-                                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                                  : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
-                              }`}
-                              title={hasNewSubTask ? "Please update all sub-tasks to Done or Skipped before submitting!" : undefined}
-                            >
-                              Submit
-                            </button>
-                          );
-                        } else {
+                        if (task.todo_status !== 'NEW') {
                           return (
                             <button
                               disabled={isUser}
@@ -2879,6 +3003,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                             >
                               Reset
                             </button>
+                          );
+                        } else {
+                          return (
+                            <span className="text-slate-400 text-xs italic">Pending</span>
                           );
                         }
                       })()}
@@ -3035,25 +3163,106 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 </div>
               </div>
 
-              {/* TASK STATUS Section showing status indicator */}
+              {/* TASK STATUS Section showing status indicator or dropdown */}
               <div className="space-y-2 pb-3 border-b border-slate-100">
                 <span className="text-xs font-semibold text-slate-500 block">Task status</span>
                 
-                <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-120">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                      openedTask.todo_status === 'DONE' 
-                        ? 'bg-emerald-500' 
-                        : openedTask.todo_status === 'SKIPPED'
-                          ? 'bg-slate-400'
-                          : 'bg-blue-500'
-                    }`} />
-                    <span className="text-xs text-slate-600">
-                      {openedTask.todo_status === 'DONE' ? 'Done' : openedTask.todo_status === 'SKIPPED' ? 'Skipped' : 'New'}
-                    </span>
+                {openedTask.sub_tasks && openedTask.sub_tasks.length > 0 ? (
+                  // Has subtasks: show read-only status (it updates automatically from subtasks)
+                  <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        openedTask.todo_status === 'DONE' 
+                          ? 'bg-emerald-500' 
+                          : openedTask.todo_status === 'SKIPPED'
+                            ? 'bg-slate-400'
+                            : 'bg-blue-500'
+                      }`} />
+                      <span className="text-xs text-slate-600 font-medium">
+                        {openedTask.todo_status === 'DONE' ? 'Done' : openedTask.todo_status === 'SKIPPED' ? 'Skipped' : 'New'} (Auto-updated from sub-tasks)
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  // No subtasks: can select status directly
+                  <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        openedTask.todo_status === 'DONE' 
+                          ? 'bg-emerald-500' 
+                          : openedTask.todo_status === 'SKIPPED'
+                            ? 'bg-amber-500'
+                            : 'bg-blue-500'
+                      }`} />
+                      <span className="text-xs text-slate-600 font-medium">
+                        {openedTask.todo_status === 'DONE' ? 'Done' : openedTask.todo_status === 'SKIPPED' ? 'Skipped' : 'New'}
+                      </span>
+                    </div>
+                    
+                    <select
+                      value={openedTask.todo_status}
+                      disabled={openedTask.todo_status === 'DONE' || openedTask.todo_status === 'SKIPPED'}
+                      className="h-7 px-2 bg-white border border-slate-200 rounded text-xs text-slate-600 focus:outline-none cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed font-medium"
+                      onChange={async (e) => {
+                        const nextStatus = e.target.value as 'NEW' | 'DONE' | 'SKIPPED';
+                        if (nextStatus !== 'NEW') {
+                          const updatedTask = {
+                            ...openedTask,
+                            todo_status: nextStatus
+                          };
+                          setOpenedTask(updatedTask);
+                          await saveTaskStatusDirectly(updatedTask, nextStatus);
+                        }
+                      }}
+                    >
+                      <option value="NEW">New</option>
+                      <option value="DONE">Done</option>
+                      <option value="SKIPPED">Skipped</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* If no sub-tasks, show Task Level Actual Time Input */}
+              {(!openedTask.sub_tasks || openedTask.sub_tasks.length === 0) && (
+                <div className="space-y-1.5 bg-slate-50 border border-slate-100 rounded-lg p-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold block">Task time tracking</span>
+                    <span className="text-slate-400 font-mono">Est: {openedTask.est_time || 0}m</span>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1 font-mono text-slate-600">
+                    <span>Actual:</span>
+                    <input 
+                      type="number"
+                      min={0}
+                      disabled={openedTask.todo_status === 'DONE' || openedTask.todo_status === 'SKIPPED'}
+                      placeholder={String(openedTask.est_time || 0)}
+                      value={openedTask.actual_time || ''}
+                      className="w-16 h-7 px-1.5 text-center bg-white border border-slate-200 rounded font-medium text-slate-800 focus:outline-none focus:border-indigo-500 text-xs font-mono disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const parsedVal = val === '' ? 0 : Math.max(0, parseInt(val) || 0);
+                        const updatedTask = {
+                          ...openedTask,
+                          actual_time: parsedVal
+                        };
+                        setOpenedTask(updatedTask);
+                      }}
+                      onBlur={async (e) => {
+                        const val = e.target.value;
+                        const parsedVal = val === '' ? (openedTask.est_time || 0) : Math.max(0, parseInt(val) || 0);
+                        const updatedTask = {
+                          ...openedTask,
+                          actual_time: parsedVal
+                        };
+                        setOpenedTask(updatedTask);
+                        await saveTaskActualTimeDirectly(updatedTask, parsedVal);
+                      }}
+                    />
+                    <span>minutes</span>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Dynamic subtasks detailed adjustments inside the slider drawer */}
               <div className="space-y-2">
@@ -3090,9 +3299,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                                 <input 
                                   type="number"
                                   min={0}
+                                  disabled={openedTask.todo_status === 'DONE' || openedTask.todo_status === 'SKIPPED'}
                                   placeholder={String(sub.est_time || 0)}
                                   value={(sub.actual_time !== undefined && sub.actual_time !== null && (sub.sub_status !== 'New' || sub.actual_time !== 0)) ? sub.actual_time : ''}
-                                  className="w-12 h-6 px-1 text-center bg-slate-50 border border-slate-200 rounded font-medium text-slate-800 focus:outline-none focus:bg-white text-xs font-mono"
+                                  className="w-12 h-6 px-1 text-center bg-slate-50 border border-slate-200 rounded font-medium text-slate-800 focus:outline-none focus:bg-white text-xs font-mono disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                                   onChange={(e) => {
                                     const val = e.target.value;
                                     let parsedVal = val === '' ? undefined : Math.max(0, parseInt(val) || 0);
@@ -3122,7 +3332,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                             {/* SELECT BOX sub-task state selection (Done, New, Skipped) */}
                             <select
                               value={currentSubStatus}
-                              className="h-6 px-1.5 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 focus:outline-none cursor-pointer"
+                              disabled={openedTask.todo_status === 'DONE' || openedTask.todo_status === 'SKIPPED'}
+                              className="h-6 px-1.5 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 focus:outline-none cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                               onChange={(e) => {
                                 const nextVal = e.target.value as 'New' | 'Done' | 'Skipped';
                                 handleUpdateSubtaskValueLocal(sub.id, { 
@@ -3169,19 +3380,12 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
                 if (openedTask.todo_status === 'NEW') {
                   return (
-                    <button 
-                      onClick={() => handleDirectSubmit(openedTask)}
-                      disabled={hasNewSubTask}
-                      className={`w-full h-8 rounded text-xs font-semibold flex items-center justify-center gap-2 shadow-sm pointer-events-auto transition-all ${
-                        hasNewSubTask
-                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed border-slate-300 opacity-70'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
-                      }`}
-                      title={hasNewSubTask ? "Please update all sub-tasks to Done or Skipped (do not leave as New) before submitting!" : undefined}
-                    >
-                      <Check size={14} />
-                      <span>Submit task</span>
-                    </button>
+                    <div className="text-center py-2 text-xs text-slate-400 italic font-medium">
+                      {openedTask.sub_tasks && openedTask.sub_tasks.length > 0 
+                        ? "Đang thực hiện. Cập nhật tất cả công việc phụ (sub-task) để tự động hoàn thành."
+                        : "Đang thực hiện. Cập nhật trạng thái công việc phía trên để hoàn thành."
+                      }
+                    </div>
                   );
                 } else {
                   return (

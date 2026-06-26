@@ -348,43 +348,82 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ tasksLoading: true });
     try {
-      const dateLimit = new Date();
-      dateLimit.setDate(dateLimit.getDate() - 14); // Optimize: 14 days is super fast and 100% sufficient for active dashboard tracking
-      const fourteenDaysAgo = dateLimit.toISOString().split('T')[0];
+      const startDate = get().startDate || new Date().toISOString().split('T')[0];
+      const endDate = get().endDate || startDate;
 
-      const activeDaysLimit = new Date();
-      activeDaysLimit.setDate(activeDaysLimit.getDate() - 180); // Restrict ancient inactive templates (180 days) to prevent statement timeouts
-      const halfYearAgoStr = activeDaysLimit.toISOString().split('T')[0];
+      let tasksRes: any = { data: [] };
+      let taskLogsRes: any = { data: [] };
+      let subtaskLogsRes: any = { data: [] };
 
-      const [tasksRes, taskLogsRes, subtaskLogsRes] = await Promise.all([
-        supabase
-          .from('tasks')
-          .select('*, subtasks(*)')
-          .or(`is_active.eq.true,created_at.gte.${halfYearAgoStr}`)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('task_logs')
-          .select('*')
-          .gte('todo_date', fourteenDaysAgo),
-        supabase
-          .from('subtask_logs')
-          .select('*')
-          .gte('todo_date', fourteenDaysAgo)
-      ]);
-
-      if (tasksRes.error) throw tasksRes.error;
-
-      // Resilient fallbacks for logs tables (avoid crashing/throwing on statement timeouts)
-      if (taskLogsRes.error) {
-        console.warn('[Sync] Failed to fetch task logs due to performance limit or timeout. Falling back to empty. Details:', taskLogsRes.error);
+      try {
+        const [tRes, tlRes, slRes] = await Promise.all([
+          supabase
+            .from('tasks')
+            .select('*, subtasks(*)')
+            .eq('is_active', true)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('task_logs')
+            .select('*')
+            .gte('todo_date', startDate)
+            .lte('todo_date', endDate),
+          supabase
+            .from('subtask_logs')
+            .select('*')
+            .gte('todo_date', startDate)
+            .lte('todo_date', endDate)
+        ]);
+        tasksRes = tRes;
+        taskLogsRes = tlRes;
+        subtaskLogsRes = slRes;
+      } catch (err: any) {
+        console.warn('[Sync] Promise.all fetch failed. Attempting resilient fallbacks...', err);
+        try {
+          tasksRes = await supabase.from('tasks').select('*, subtasks(*)').eq('is_active', true).order('created_at', { ascending: false });
+        } catch (e1) {
+          console.warn('[Sync] Resilient fallback tasks fetch error:', e1);
+        }
+        try {
+          taskLogsRes = await supabase.from('task_logs').select('*').gte('todo_date', startDate).lte('todo_date', endDate);
+        } catch (e2) {
+          console.warn('[Sync] Resilient fallback task_logs fetch error:', e2);
+        }
+        try {
+          subtaskLogsRes = await supabase.from('subtask_logs').select('*').gte('todo_date', startDate).lte('todo_date', endDate);
+        } catch (e3) {
+          console.warn('[Sync] Resilient fallback subtask_logs fetch error:', e3);
+        }
       }
-      if (subtaskLogsRes.error) {
-        console.warn('[Sync] Failed to fetch subtask logs due to performance limit or timeout. Falling back to empty. Details:', subtaskLogsRes.error);
+
+      if (tasksRes.error) {
+        console.warn('[Sync] Tasks query returned error:', tasksRes.error);
       }
 
-      const tasksRaw = tasksRes.data || [];
+      let tasksRaw = tasksRes.data || [];
       const allTaskLogs = taskLogsRes.data || [];
       const allSubtaskLogs = subtaskLogsRes.data || [];
+
+      // Fetch missing inactive templates dynamically to keep the first load super-fast and indexed
+      const activeTaskIds = new Set(tasksRaw.map((t: any) => t.id));
+      const loggedTaskIds = new Set([
+        ...allTaskLogs.map((log: any) => log.task_id),
+        ...allSubtaskLogs.map((log: any) => log.task_id)
+      ].filter(Boolean));
+      const missingTaskIds = Array.from(loggedTaskIds).filter(id => !activeTaskIds.has(id));
+
+      if (missingTaskIds.length > 0) {
+        try {
+          const { data: historicalTasks, error: histError } = await supabase
+            .from('tasks')
+            .select('*, subtasks(*)')
+            .in('id', missingTaskIds);
+          if (!histError && historicalTasks) {
+            tasksRaw = [...tasksRaw, ...historicalTasks];
+          }
+        } catch (histErr) {
+          console.warn('[Sync] Failed to fetch historical inactive tasks:', histErr);
+        }
+      }
 
       // Hydrate backward-compatible completions object on descriptions in-memory
       const processed = tasksRaw.map((tRaw: any) => {
@@ -571,20 +610,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (forceTemplates || !get().activeTasksTemplatesLoaded || tasksData.length === 0) {
         // 1. Chỉ tải các task bản mẫu đang hoạt động (is_active = true) kèm subtasks của chúng khi chưa có cache hoặc bị buộc tải lại
         // Giải pháp này giúp hệ thống hoạt động cực kỳ mượt mà khi số lượng task lưu trữ lớn lên theo thời gian.
-        const { data: activeTasks, error: tasksError } = await supabase
-          .from('tasks')
-          .select(`
-            *,
-            subtasks(*)
-          `)
-          .eq('is_active', true);
+        try {
+          const { data: activeTasks, error: tasksError } = await supabase
+            .from('tasks')
+            .select(`
+              *,
+              subtasks(*)
+            `)
+            .eq('is_active', true);
 
-        if (tasksError) throw tasksError;
-        tasksData = activeTasks || [];
-        set({ 
-          activeTasksTemplates: tasksData,
-          activeTasksTemplatesLoaded: true
-        });
+          if (tasksError) throw tasksError;
+          tasksData = activeTasks || [];
+          set({ 
+            activeTasksTemplates: tasksData,
+            activeTasksTemplatesLoaded: true
+          });
+        } catch (tasksErr: any) {
+          console.warn('[Sync] Failed to fetch active task templates:', tasksErr);
+          // Don't crash, keep whatever we have
+        }
       }
 
       // 2. Fetch daily logs for the target date or date range
@@ -599,13 +643,31 @@ export const useAppStore = create<AppState>((set, get) => ({
         subtaskLogsQuery = subtaskLogsQuery.eq('todo_date', startDateString);
       }
 
-      const [taskLogsRes, subtaskLogsRes] = await Promise.all([
-        taskLogsQuery,
-        subtaskLogsQuery
-      ]);
+      let taskLogsData: any[] = [];
+      let subtaskLogsData: any[] = [];
 
-      const taskLogsData = taskLogsRes.data || [];
-      const subtaskLogsData = subtaskLogsRes.data || [];
+      try {
+        const [taskLogsRes, subtaskLogsRes] = await Promise.all([
+          taskLogsQuery,
+          subtaskLogsQuery
+        ]);
+        taskLogsData = taskLogsRes.data || [];
+        subtaskLogsData = subtaskLogsRes.data || [];
+      } catch (err) {
+        console.warn('[Sync] Failed to perform Promise.all daily logs fetch. Trying individual fallbacks...', err);
+        try {
+          const res1 = await taskLogsQuery;
+          taskLogsData = res1.data || [];
+        } catch (e1) {
+          console.warn('[Sync] Individual task logs fallback fetch error:', e1);
+        }
+        try {
+          const res2 = await subtaskLogsQuery;
+          subtaskLogsData = res2.data || [];
+        } catch (e2) {
+          console.warn('[Sync] Individual subtask logs fallback fetch error:', e2);
+        }
+      }
 
       // 3. Tìm các task ID đã bị tắt hoạt động (inactive) nhưng vẫn có dữ liệu log lịch sử trong ngày này để tải bổ sung
       const activeTaskIds = new Set((tasksData || []).map(t => t.id));

@@ -1467,7 +1467,7 @@ const TaskManager: React.FC = () => {
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-slate-400 font-medium block">Team</span>
-                  <span className="text-slate-700 block text-xs truncate">{getTaskTeams(openedDrawerTask.sub_tasks, (openedDrawerTask as any).team_name || drawerParsedMeta.team_name).display}</span>
+                  <span className="text-slate-700 block text-xs truncate">{getTaskTeams(openedDrawerTask.subtasks || [], (openedDrawerTask as any).team_name || drawerParsedMeta.team_name).display}</span>
                 </div>
                 <div className="space-y-0.5">
                   <span className="text-slate-400 font-medium block">Frequency mode</span>
@@ -1520,8 +1520,8 @@ const TaskManager: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  {openedDrawerTask.sub_tasks && openedDrawerTask.sub_tasks.length > 0 ? (
-                    openedDrawerTask.sub_tasks.map((sub, index) => (
+                  {openedDrawerTask.subtasks && openedDrawerTask.subtasks.length > 0 ? (
+                    openedDrawerTask.subtasks.map((sub, index) => (
                       <div 
                         key={sub.id || index} 
                         className="border border-slate-100 hover:border-blue-100 hover:bg-blue-50/10 transition-all rounded-lg p-3 bg-white flex flex-col justify-between gap-2 relative shadow-xs animate-in fade-in"
