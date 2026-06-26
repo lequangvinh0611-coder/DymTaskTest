@@ -787,6 +787,13 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 team_name: log.team_name || ''
               };
             });
+            // Sort to preserve original template subtask sequence
+            sub_tasks.sort((a: any, b: any) => {
+              const idxA = (task.subtasks || []).findIndex((s: any) => s && s.id === a.id);
+              const idxB = (task.subtasks || []).findIndex((s: any) => s && s.id === b.id);
+              if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+              return 0;
+            });
           } else {
             sub_tasks = (task.subtasks || []).map((sub: any) => {
               const log = sub.subtask_logs?.find((l: any) => l.todo_date === occ.todo_date);
@@ -927,6 +934,13 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   sub_status,
                   team_name: log.team_name || ''
                 };
+              });
+              // Sort to preserve original template subtask sequence
+              sub_tasks.sort((a: any, b: any) => {
+                const idxA = (task.subtasks || []).findIndex((s: any) => s && s.id === a.id);
+                const idxB = (task.subtasks || []).findIndex((s: any) => s && s.id === b.id);
+                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                return 0;
               });
             } else {
               sub_tasks = (task.subtasks || []).map((sub: any) => {
