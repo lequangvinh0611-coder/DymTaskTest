@@ -114,9 +114,37 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'approve_tasks' }, () => {
             debouncedFetchApproveTasks();
           })
-          .subscribe();
+          // Listen for custom broadcast events for instant synchronization (Dual-Sync architecture)
+          .on('broadcast', { event: 'tasks_changed' }, () => {
+            console.log('[Realtime Broadcast] Received tasks_changed event');
+            debouncedFetchTemplatesAndDaily();
+          })
+          .on('broadcast', { event: 'task_logs_changed' }, (payload: any) => {
+            console.log('[Realtime Broadcast] Received task_logs_changed event:', payload);
+            const state = useAppStore.getState();
+            const targetDate = payload.payload?.todo_date;
+            if (targetDate && state.startDate && state.endDate) {
+              if (targetDate >= state.startDate && targetDate <= state.endDate) {
+                debouncedFetchDailyOnly();
+              }
+            } else {
+              debouncedFetchDailyOnly();
+            }
+          })
+          .on('broadcast', { event: 'metadata_changed' }, () => {
+            console.log('[Realtime Broadcast] Received metadata_changed event');
+            debouncedFetchMetadata();
+          })
+          .on('broadcast', { event: 'approve_tasks_changed' }, () => {
+            console.log('[Realtime Broadcast] Received approve_tasks_changed event');
+            debouncedFetchApproveTasks();
+          })
+          .subscribe((status, err) => {
+            console.log(`[Realtime] Subscription status for channel global_app_realtime_sync: ${status}`, err || '');
+          });
 
         channelRef.current = channel;
+        (window as any).globalRealtimeChannel = channel;
       };
 
       // Hàm ẩn kênh/ngắt kết nối toàn cục
@@ -126,6 +154,7 @@ export default function App() {
             console.warn('[App] Realtime unsubscribe error:', err);
           });
           channelRef.current = null;
+          (window as any).globalRealtimeChannel = null;
         }
       };
 

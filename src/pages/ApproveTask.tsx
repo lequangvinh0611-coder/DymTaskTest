@@ -3,7 +3,7 @@ import {
   Search, RotateCcw, Plus, Trash2, Power, Clock, ChevronLeft, ChevronRight, 
   Edit2, MoreHorizontal, X, AlertCircle, Loader2, Check, Ban, History, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, safeBroadcast } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import CreateApproveTaskModal from '../components/CreateApproveTaskModal';
 import { FilterSelect } from '../components/ui/FilterSelect';
@@ -1112,6 +1112,8 @@ const ApproveTask: React.FC = () => {
       // 5. Synchronize App store
       await fetchTasks(true);
       await loadRequests();
+      safeBroadcast('tasks_changed');
+      safeBroadcast('approve_tasks_changed');
 
     } catch (err: any) {
       console.error('[ApproveTask] Error accepting request:', err);
@@ -1194,6 +1196,7 @@ const ApproveTask: React.FC = () => {
       setRejectDialogTask(null);
       setRejectReasonInput('');
       loadRequests();
+      safeBroadcast('approve_tasks_changed');
     } catch (err: any) {
       console.error('[ApproveTask] Error rejecting:', err);
       toast.error(`Database Error: ${err.message || 'Could not reject request'}`);
@@ -1224,6 +1227,7 @@ const ApproveTask: React.FC = () => {
           toast.success('Task request deleted successfully.');
           setOpenedDrawerTask(null);
           loadRequests();
+          safeBroadcast('approve_tasks_changed');
         } catch (err: any) {
           console.error('[ApproveTask] Error deleting:', err);
           toast.error(`Database Error: ${err.message || 'Could not delete request record'}`);

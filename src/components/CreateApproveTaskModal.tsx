@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Trash2, Clock, Loader2, Plus, Calendar } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, safeBroadcast } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../types';
@@ -1065,6 +1065,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
       }
 
       await useAppStore.getState().fetchApproveTasks(true);
+      safeBroadcast('approve_tasks_changed');
       onSuccess();
       onClose();
     } catch (err: any) {
