@@ -1788,9 +1788,16 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
 
                   {/* Task Name */}
                   <td className="px-3 py-1.5 overflow-hidden">
-                    <span className="font-semibold text-slate-700 text-xs truncate block" title={task.title || ''}>
-                      {task.title}
-                    </span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-semibold text-slate-700 text-xs truncate" title={task.title || ''}>
+                        {task.title}
+                      </span>
+                      {task.reject_reason && task.status === 'PENDING' && (
+                        <span className="inline-flex items-center bg-indigo-50 text-indigo-600 border border-indigo-100 rounded px-1 py-0.5 text-[9px] font-bold shrink-0" title={task.reject_reason}>
+                          Có ghi chú
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   {/* Project */}
@@ -2154,14 +2161,23 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.approve_tasks;`}
                 </div>
               </div>
 
-              {/* Rejection Reason display */}
+              {/* Rejection Reason / Sender Note display */}
               {openedDrawerTask?.reject_reason && (
-                <div className="space-y-1 bg-red-50 border border-red-100 rounded-lg p-3 text-xs">
-                  <span className="text-red-500 font-bold block uppercase tracking-wider text-[10px]">Rejection Reason</span>
-                  <div className="mt-1 font-medium leading-normal text-red-700 whitespace-pre-wrap break-words">
-                    {openedDrawerTask.reject_reason}
+                openedDrawerTask.status === 'PENDING' ? (
+                  <div className="space-y-1 bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-xs">
+                    <span className="text-indigo-600 font-bold block uppercase tracking-wider text-[10px]">Lý do chỉnh sửa / Ghi chú từ người gửi</span>
+                    <div className="mt-1 font-medium leading-normal text-indigo-700 whitespace-pre-wrap break-words font-medium">
+                      {openedDrawerTask.reject_reason}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-1 bg-red-50 border border-red-100 rounded-lg p-3 text-xs">
+                    <span className="text-red-500 font-bold block uppercase tracking-wider text-[10px]">Rejection Reason</span>
+                    <div className="mt-1 font-medium leading-normal text-red-700 whitespace-pre-wrap break-words">
+                      {openedDrawerTask.reject_reason}
+                    </div>
+                  </div>
+                )
               )}
 
               {/* Onetime targets display removed as requested */}

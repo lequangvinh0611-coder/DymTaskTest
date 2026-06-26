@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Trash2, Clock, Loader2, Plus, Calendar } from 'lucide-react';
+import { X, Trash2, Clock, Loader2, Plus, Calendar, Edit3 } from 'lucide-react';
 import { supabase, safeBroadcast } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/authStore';
@@ -360,6 +360,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
     { id: '1', date: '', time: '17:00' }
   ]);
   const [subTasks, setSubTasks] = useState<SubTask[]>([]);
+  const [showReasonDialog, setShowReasonDialog] = useState(false);
+  const [editReason, setEditReason] = useState('');
 
   // Keep onetimeTargets in sync with selected start/end dates and deadlineTime24h
   useEffect(() => {
@@ -435,6 +437,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         setTeam(meta.team_name || '');
         setTaskType(taskToEdit.task_type || '');
         setNote(meta.note || '');
+        setEditReason(taskToEdit.reject_reason || '');
+        setShowReasonDialog(false);
 
         const currentDeadlineTime = meta.deadline_time || (taskToEdit as any).deadline_time || '';
         if (currentDeadlineTime) {
@@ -500,6 +504,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           subTasks: initialSubtasks
         });
       } else if (taskToClone) {
+        setEditReason('');
+        setShowReasonDialog(false);
         const meta = parseTaskDescription(taskToClone.description);
         setTaskName(taskToClone.title || taskToClone.task_name || '');
         setProject(meta.project_name || taskToClone.project_name || '');
@@ -576,6 +582,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           subTasks: clonedSubtasks
         });
       } else {
+        setEditReason('');
+        setShowReasonDialog(false);
         setTaskName('');
         setProject('');
         setTag('');
@@ -882,6 +890,15 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
       }
     }
 
+    const isTemplateEdit = !!originalTaskId || !!(taskToEdit && (taskToEdit.description as any)?.original_task_id);
+    if (isTemplateEdit) {
+      setShowReasonDialog(true);
+    } else {
+      await handleSaveRequest(null);
+    }
+  };
+
+  const handleSaveRequest = async (reason: string | null) => {
     setLoading(true);
     try {
       const sortedTargets = [...onetimeTargets].sort((a, b) => a.date.localeCompare(b.date));
@@ -1034,7 +1051,8 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
         status: 'PENDING', // Reset status as PENDING on create or edit/re-approve
         actual_time: 0,
         user_id: profile?.id || null,
-        history: isEditMode && taskToEdit ? (taskToEdit as any).history || [] : unifiedHistory
+        history: isEditMode && taskToEdit ? (taskToEdit as any).history || [] : unifiedHistory,
+        reject_reason: reason || null
       };
 
       if (isEditMode && taskToEdit) {
@@ -1091,7 +1109,7 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
       }}
       className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-150"
     >
-      <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150">
+      <div className="relative bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150">
         
         {/* Header */}
         <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
@@ -1430,6 +1448,53 @@ const CreateApproveTaskModal: React.FC<CreateApproveTaskModalProps> = ({
           </div>
 
         </form>
+
+        {showReasonDialog && (
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-6 z-[100] animate-in fade-in duration-150">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-100 max-w-md w-full p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-150 text-left">
+              <div className="flex items-start gap-3 pb-3 border-b border-slate-150">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg shrink-0 mt-0.5">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-800">Lý do chỉnh sửa / Ghi chú</h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Vui lòng cung cấp lý do hoặc ghi chú thay đổi để người duyệt dễ dàng đưa ra quyết định duyệt (áp dụng hôm nay hay từ hôm nay trở đi).</p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-600">Nội dung ghi chú / lý do (bắt buộc)</label>
+                <textarea
+                  required
+                  rows={4}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 focus:border-indigo-500 rounded-lg focus:outline-none transition-all text-slate-700 bg-white shadow-inner resize-none font-medium"
+                  placeholder="Ví dụ: Cần đổi người chịu trách nhiệm cho subtask A, hoặc chỉ áp dụng đổi cho hôm nay thôi nhé..."
+                  value={editReason}
+                  onChange={(e) => setEditReason(removeEmojisAndIcons(e.target.value))}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowReasonDialog(false)}
+                  className="flex-1 h-8 rounded-md text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors cursor-pointer"
+                >
+                  Quay lại
+                </button>
+                <button
+                  type="button"
+                  disabled={loading || !editReason.trim()}
+                  onClick={() => handleSaveRequest(editReason.trim())}
+                  className="flex-1 h-8 rounded-md text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  Gửi yêu cầu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
