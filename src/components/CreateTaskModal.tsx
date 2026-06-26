@@ -986,6 +986,32 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
 
         if (taskError) throw taskError;
 
+        // If today's log exists with status 'NEW' or 'PENDING', clear it so that the new template applies to today too
+        try {
+          const { data: existingLogToday } = await supabase
+            .from('task_logs')
+            .select('status')
+            .eq('task_id', taskToEdit.id)
+            .eq('todo_date', todayStr)
+            .maybeSingle();
+
+          if (existingLogToday && (existingLogToday.status?.toUpperCase() === 'NEW' || existingLogToday.status?.toUpperCase() === 'PENDING')) {
+            await supabase
+              .from('task_logs')
+              .delete()
+              .eq('task_id', taskToEdit.id)
+              .eq('todo_date', todayStr);
+
+            await supabase
+              .from('subtask_logs')
+              .delete()
+              .eq('task_id', taskToEdit.id)
+              .eq('todo_date', todayStr);
+          }
+        } catch (logClearErr) {
+          console.warn('Error clearing today\'s draft logs:', logClearErr);
+        }
+
         // B. Đồng bộ hóa Subtask quan hệ trong bảng subtasks
         // 1. Quét danh sách các subtask hiện có trong DB của bản mẫu task_id này
         const { data: dbSubtasks, error: fetchSubError } = await supabase

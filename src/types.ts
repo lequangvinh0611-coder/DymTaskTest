@@ -431,10 +431,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         tRaw.task_logs = allTaskLogs.filter((log: any) => log.task_id === tRaw.id);
         tRaw.subtask_logs = allSubtaskLogs.filter((log: any) => log.task_id === tRaw.id);
 
-        // Enforce unique subtasks by database primary key id to prevent double subtasks
-        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) =>
-          self.findIndex((s: any) => s.id === sub.id) === index
-        );
+        // Enforce unique subtasks by database primary key id and content to prevent double subtasks
+        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) => {
+          if (!sub) return false;
+          if (sub.id) {
+            const firstIdx = self.findIndex((s: any) => s && s.id === sub.id);
+            if (firstIdx !== index) return false;
+          }
+          const content = (sub.content || sub.name || '').trim().toLowerCase();
+          return self.findIndex((s: any) => s && (s.content || s.name || '').trim().toLowerCase() === content) === index;
+        }).sort((a: any, b: any) => {
+          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return timeA - timeB;
+        });
         const task = { ...tRaw, subtasks: uniqueSubs };
         
         // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
@@ -694,10 +704,20 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       // 3. Assemble and virtualize on the frontend
       const processed = (tasksData || []).map((tRaw: any) => {
-        // Enforce unique subtasks by database primary key id to prevent double subtasks
-        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) =>
-          self.findIndex((s: any) => s.id === sub.id) === index
-        );
+        // Enforce unique subtasks by database primary key id and content to prevent double subtasks
+        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) => {
+          if (!sub) return false;
+          if (sub.id) {
+            const firstIdx = self.findIndex((s: any) => s && s.id === sub.id);
+            if (firstIdx !== index) return false;
+          }
+          const content = (sub.content || sub.name || '').trim().toLowerCase();
+          return self.findIndex((s: any) => s && (s.content || s.name || '').trim().toLowerCase() === content) === index;
+        }).sort((a: any, b: any) => {
+          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return timeA - timeB;
+        });
         const task = { ...tRaw, subtasks: uniqueSubs };
         
         // Assemble metadata ảo từ cột thực tế trong DB để tương thích ngược 100% với UI
@@ -888,9 +908,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       // Helper for processing global tasks
       const processTaskForGlobalTasks = (tRaw: any) => {
-        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) =>
-          self.findIndex((s: any) => s.id === sub.id) === index
-        );
+        const uniqueSubs = (tRaw.subtasks || []).filter((sub: any, index: number, self: any[]) => {
+          if (!sub) return false;
+          if (sub.id) {
+            const firstIdx = self.findIndex((s: any) => s && s.id === sub.id);
+            if (firstIdx !== index) return false;
+          }
+          const content = (sub.content || sub.name || '').trim().toLowerCase();
+          return self.findIndex((s: any) => s && (s.content || s.name || '').trim().toLowerCase() === content) === index;
+        }).sort((a: any, b: any) => {
+          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return timeA - timeB;
+        });
         const task = { ...tRaw, subtasks: uniqueSubs };
         
         const firstTeamName = task.subtasks?.find((s: any) => s.team_name)?.team_name || '';
@@ -1011,9 +1041,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       // Helper for processing daily tasks
       const processTaskForDailyTasks = (task: any, taskLogs: any[], subtaskLogs: any[]) => {
-        const uniqueSubs = (task.subtasks || []).filter((sub: any, index: number, self: any[]) =>
-          self.findIndex((s: any) => s.id === sub.id) === index
-        );
+        const uniqueSubs = (task.subtasks || []).filter((sub: any, index: number, self: any[]) => {
+          if (!sub) return false;
+          if (sub.id) {
+            const firstIdx = self.findIndex((s: any) => s && s.id === sub.id);
+            if (firstIdx !== index) return false;
+          }
+          const content = (sub.content || sub.name || '').trim().toLowerCase();
+          return self.findIndex((s: any) => s && (s.content || s.name || '').trim().toLowerCase() === content) === index;
+        }).sort((a: any, b: any) => {
+          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return timeA - timeB;
+        });
         const taskEnforced = { ...task, subtasks: uniqueSubs };
         
         const firstTeamName = taskEnforced.subtasks?.find((s: any) => s.team_name)?.team_name || '';

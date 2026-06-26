@@ -842,7 +842,34 @@ const ApproveTask: React.FC = () => {
           toast.success(`Request accepted! Changes applied only for today's instance of task "${request.title}".`);
         } else {
           // --- FUTURE: Standard Template and Subtasks Delta sync ---
+          const todayStr = getTodayDateString();
           const latestMeta = parseTaskDescription(originalTask.description);
+
+          // If today's log exists with status 'NEW' or 'PENDING', clear it so that the new template applies to today too
+          try {
+            const { data: existingLogToday } = await supabase
+              .from('task_logs')
+              .select('status')
+              .eq('task_id', request.meta.original_task_id)
+              .eq('todo_date', todayStr)
+              .maybeSingle();
+
+            if (existingLogToday && (existingLogToday.status?.toUpperCase() === 'NEW' || existingLogToday.status?.toUpperCase() === 'PENDING')) {
+              await supabase
+                .from('task_logs')
+                .delete()
+                .eq('task_id', request.meta.original_task_id)
+                .eq('todo_date', todayStr);
+
+              await supabase
+                .from('subtask_logs')
+                .delete()
+                .eq('task_id', request.meta.original_task_id)
+                .eq('todo_date', todayStr);
+            }
+          } catch (logClearErr) {
+            console.warn('Error clearing today\'s draft logs in ApproveTask:', logClearErr);
+          }
           
           // Fetch actual live subtasks of the original task template to preserve in oldVersion history
           const { data: originalSubs } = await supabase
@@ -915,7 +942,6 @@ const ApproveTask: React.FC = () => {
           }
 
           // Structural versioning
-          const todayStr = getTodayDateString();
           const yesterdayStr = getYesterdayDateString(todayStr);
 
           const current_valid_from = latestMeta.last_updated_at

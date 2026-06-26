@@ -822,6 +822,17 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             });
           }
 
+          // Deduplicate sub_tasks to prevent any UI-level doubling
+          sub_tasks = sub_tasks.filter((sub: any, index: number, self: any[]) => {
+            if (!sub) return false;
+            if (sub.id) {
+              const firstIdx = self.findIndex((s: any) => s && s.id === sub.id);
+              if (firstIdx !== index) return false;
+            }
+            const content = (sub.content || sub.name || '').trim().toLowerCase();
+            return self.findIndex((s: any) => s && (s.content || s.name || '').trim().toLowerCase() === content) === index;
+          });
+
           // Sum calculations for parent est_time and actual_time
           const calc_est_time = (isDoneOrSkipped && matchedLog && matchedLog.est_time !== undefined && matchedLog.est_time !== null)
             ? matchedLog.est_time
@@ -949,6 +960,17 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 };
               });
             }
+
+            // Deduplicate sub_tasks to prevent any UI-level doubling
+            sub_tasks = sub_tasks.filter((sub: any, index: number, self: any[]) => {
+              if (!sub) return false;
+              if (sub.id) {
+                const firstIdx = self.findIndex((s: any) => s && s.id === sub.id);
+                if (firstIdx !== index) return false;
+              }
+              const content = (sub.content || sub.name || '').trim().toLowerCase();
+              return self.findIndex((s: any) => s && (s.content || s.name || '').trim().toLowerCase() === content) === index;
+            });
 
             const calc_est_time = (isDoneOrSkipped && matchedLog && matchedLog.est_time !== undefined && matchedLog.est_time !== null)
               ? matchedLog.est_time
@@ -1619,44 +1641,17 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     
     if (saveImmediately) {
       setDrawerHasChanges(false);
-      await saveOpenedTaskChanges(updatedTask);
+      await saveOpenedTaskChanges(updatedTask, false);
     } else {
       setDrawerHasChanges(true);
     }
   };
 
   // Save accumulated sub-task changes to Supabase upon drawer closing
-  const saveOpenedTaskChanges = async (taskToSave: VirtualTask) => {
+  const saveOpenedTaskChanges = async (taskToSave: VirtualTask, showToast: boolean = false) => {
     try {
       const completedBy = activeUser?.name || activeUser?.email || 'Unknown';
 
-      // Save subtask logs to DB as well for each subtask to ensure perfect synchronization
-      await Promise.all((taskToSave.sub_tasks || []).map(async (sub) => {
-        const nextVal = sub.sub_status || 'New';
-        const statusUpper = nextVal.toUpperCase();
-        const isCompleted = nextVal === 'Done';
-        const calcAct = isCompleted ? (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined && (sub as any).actual_minutes !== null ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0))) : 0;
-        
-        await supabase
-          .from('subtask_logs')
-          .upsert({
-            subtask_id: sub.id,
-            task_id: taskToSave.id,
-            todo_date: taskToSave.todo_date,
-            status: statusUpper,
-            is_completed: isCompleted,
-            completed_by: completedBy,
-            team_name: sub.team_name || '',
-            content: sub.content || sub.name || '',
-            assignee: sub.assignee || '',
-            est_time: sub.est_time || (sub as any).estimated_minutes || 0,
-            actual_time: calcAct
-          }, {
-            onConflict: 'subtask_id,todo_date'
-          });
-      }));
-
-      // In RDBMS mode, let's also update the task_logs status to DONE if everything is Done, or handle normally
       const hasNewSubTask = (taskToSave.sub_tasks || []).some(sub => (sub.sub_status || 'New') === 'New');
       const allSkipped = (taskToSave.sub_tasks || []).every(sub => (sub.sub_status || 'New') === 'Skipped');
       
@@ -1667,26 +1662,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         0
       ) || taskToSave.est_time || 0;
 
-      await supabase
-        .from('task_logs')
-        .upsert({
-          task_id: taskToSave.id,
-          todo_date: taskToSave.todo_date,
-          status: newStatus,
-          updated_by: completedBy,
-          title: taskToSave.title || '',
-          project_name: taskToSave.project_name || '',
-          tag_name: taskToSave.tag_name || '',
-          deadline_time: taskToSave.deadline_time || '17:00',
-          deadline_days: taskToSave.deadline_days || '',
-          task_type: taskToSave.task_type || 'DAILY',
-          est_time: taskToSave.est_time || 0,
-          actual_time: calculatedActual
-        }, {
-          onConflict: 'task_id,todo_date'
-        });
-
-      // Update dailyTasks locally in useAppStore
+      // 1. UPDATE ZUSTAND STORE OPTIMISTICALLY FIRST (Instant 60fps local sync)
       useAppStore.setState(state => {
         const nextDailyTasks = state.dailyTasks.map(t => {
           if (t.id === taskToSave.id) {
@@ -1781,8 +1757,64 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         return { dailyTasks: nextDailyTasks };
       });
 
+      // 2. RUN SUPABASE DATABASE UPDATES
+      // Combine all subtask logs updates into a single batch upsert
+      const subtaskLogsToUpsert = (taskToSave.sub_tasks || []).map((sub) => {
+        const nextVal = sub.sub_status || 'New';
+        const statusUpper = nextVal.toUpperCase();
+        const isCompleted = nextVal === 'Done';
+        const calcAct = isCompleted ? (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined && (sub as any).actual_minutes !== null ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0))) : 0;
+        
+        return {
+          subtask_id: sub.id,
+          task_id: taskToSave.id,
+          todo_date: taskToSave.todo_date,
+          status: statusUpper,
+          is_completed: isCompleted,
+          completed_by: completedBy,
+          team_name: sub.team_name || '',
+          content: sub.content || sub.name || '',
+          assignee: sub.assignee || '',
+          est_time: sub.est_time || (sub as any).estimated_minutes || 0,
+          actual_time: calcAct
+        };
+      });
+
+      if (subtaskLogsToUpsert.length > 0) {
+        const { error: subtaskLogsErr } = await supabase
+          .from('subtask_logs')
+          .upsert(subtaskLogsToUpsert, {
+            onConflict: 'subtask_id,todo_date'
+          });
+        if (subtaskLogsErr) throw subtaskLogsErr;
+      }
+
+      const { error: taskLogsErr } = await supabase
+        .from('task_logs')
+        .upsert({
+          task_id: taskToSave.id,
+          todo_date: taskToSave.todo_date,
+          status: newStatus,
+          updated_by: completedBy,
+          title: taskToSave.title || '',
+          project_name: taskToSave.project_name || '',
+          tag_name: taskToSave.tag_name || '',
+          deadline_time: taskToSave.deadline_time || '17:00',
+          deadline_days: taskToSave.deadline_days || '',
+          task_type: taskToSave.task_type || 'DAILY',
+          est_time: taskToSave.est_time || 0,
+          actual_time: calculatedActual
+        }, {
+          onConflict: 'task_id,todo_date'
+        });
+      if (taskLogsErr) throw taskLogsErr;
+
       await checkAndToggleOnetimeTemplateStatus(taskToSave.id);
-      toast.success('Changes saved successfully!');
+      
+      if (showToast) {
+        toast.success('Changes saved successfully!');
+      }
+      
       safeBroadcast('task_logs_changed', { todo_date: taskToSave.todo_date });
     } catch (err: any) {
       console.error('Error saving task edits on close:', err);
@@ -1929,7 +1961,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   // Close side drawer after saving pending changes
   const handleCloseDrawer = async () => {
     if (drawerHasChanges && openedTask) {
-      await saveOpenedTaskChanges(openedTask);
+      await saveOpenedTaskChanges(openedTask, true);
     }
     setOpenedTask(null);
     setDrawerHasChanges(false);
@@ -1938,7 +1970,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   // Open side drawer with change check
   const handleOpenTask = async (task: VirtualTask) => {
     if (drawerHasChanges && openedTask) {
-      await saveOpenedTaskChanges(openedTask);
+      await saveOpenedTaskChanges(openedTask, true);
     }
     setOpenedTask(task);
     setDrawerHasChanges(false);
@@ -3006,7 +3038,13 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                           );
                         } else {
                           return (
-                            <span className="text-slate-400 text-xs italic">Pending</span>
+                            <button
+                              disabled={true}
+                              className="px-2.5 h-6 rounded-md text-xs font-medium border bg-slate-50 border-slate-100 text-slate-400 cursor-not-allowed opacity-60 italic"
+                              title="Task is currently new/pending, cannot be reset"
+                            >
+                              Reset
+                            </button>
                           );
                         }
                       })()}
@@ -3365,7 +3403,6 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             <div className="p-4 border-t border-slate-100 shrink-0">
               {(() => {
                 const isOneTime = (openedTask.task_type || '').toUpperCase() === 'ONETIME';
-                const hasNewSubTask = (openedTask.sub_tasks || []).some(sub => (sub.sub_status || 'New') === 'New');
                 const isResetDisabled = (!isOneTime && !openedTask.is_active) || isUser;
                 const resetTitle = isUser
                   ? "You do not have permission to reset tasks!"
@@ -3380,22 +3417,24 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
                 if (openedTask.todo_status === 'NEW') {
                   return (
-                    <div className="text-center py-2 text-xs text-slate-400 italic font-medium">
-                      {openedTask.sub_tasks && openedTask.sub_tasks.length > 0 
-                        ? "Đang thực hiện. Cập nhật tất cả công việc phụ (sub-task) để tự động hoàn thành."
-                        : "Đang thực hiện. Cập nhật trạng thái công việc phía trên để hoàn thành."
-                      }
-                    </div>
+                    <button 
+                      disabled={true}
+                      className="w-full h-11 rounded-md text-xs font-semibold flex items-center justify-center gap-2 shadow-sm bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60"
+                      title="Task is currently new/pending, cannot be reset"
+                    >
+                      <RotateCcw size={14} />
+                      <span>Reset task</span>
+                    </button>
                   );
                 } else {
                   return (
                     <button 
                       onClick={() => handleResetTask(openedTask)}
                       disabled={isResetDisabled}
-                      className={`w-full h-8 rounded text-xs font-semibold flex items-center justify-center gap-2 shadow-sm pointer-events-auto transition-all ${
+                      className={`w-full h-11 rounded-md text-xs font-bold flex items-center justify-center gap-2 shadow-sm pointer-events-auto transition-all ${
                         isResetDisabled
-                          ? 'bg-slate-200 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
-                          : 'bg-slate-600 hover:bg-slate-700 text-white cursor-pointer'
+                          ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                          : 'bg-[#475569] hover:bg-[#334155] text-white cursor-pointer'
                       }`}
                       title={resetTitle}
                     >
