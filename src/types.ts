@@ -1036,6 +1036,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       });
 
+      // Đồng thời cập nhật danh sách approve_tasks khi đồng bộ delta
+      await get().fetchApproveTasks(true);
+
       set({
         tasks: nextTasks,
         dailyTasks: nextDailyTasks,
@@ -1050,6 +1053,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       try {
         await get().fetchTasks(true);
         await get().fetchMetadata(true);
+        await get().fetchApproveTasks(true);
         const startDate = get().startDate;
         if (startDate) {
           await get().fetchDailyTasks(startDate, get().endDate, true, true);

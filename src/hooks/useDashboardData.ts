@@ -16,8 +16,8 @@ export const useDashboardData = () => {
 
   useEffect(() => {
     // Silent background updates for state freshness
-    fetchTasks();
-    fetchMetadata();
+    fetchTasks(true);
+    fetchMetadata(true);
   }, []);
 
   return {

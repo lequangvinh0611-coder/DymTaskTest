@@ -130,9 +130,9 @@ export default function App() {
       };
 
       // Lần đầu tải trang
-      fetchMetadata();
-      fetchTasks();
-      fetchApproveTasks();
+      fetchMetadata(true);
+      fetchTasks(true);
+      fetchApproveTasks(true);
       subscribeRealtime();
 
       // Theo dõi trạng thái hiển thị của tab trình duyệt

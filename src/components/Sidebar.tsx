@@ -57,8 +57,8 @@ const Sidebar = () => {
   const currentUser = profile;
 
   React.useEffect(() => {
-    fetchMetadata();
-    fetchApproveTasks();
+    fetchMetadata(true);
+    fetchApproveTasks(true);
   }, [fetchMetadata, fetchApproveTasks]);
 
   const counts = React.useMemo(() => {

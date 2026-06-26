@@ -425,9 +425,9 @@ const TaskManager: React.FC = () => {
 
   useEffect(() => {
     // Run silent background fetches to guarantee data freshness
-    fetchTasks();
-    fetchMetadata();
-    fetchApproveTasks();
+    fetchTasks(true);
+    fetchMetadata(true);
+    fetchApproveTasks(true);
   }, []);
 
   // Compute parsed tasks incorporating their JSON descriptions

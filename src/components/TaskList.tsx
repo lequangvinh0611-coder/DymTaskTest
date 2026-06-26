@@ -684,8 +684,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
   useEffect(() => {
     // Run background cache updates silently
-    fetchDailyTasks(startDate, endDate);
-    fetchMetadata();
+    fetchDailyTasks(startDate, endDate, true, true);
+    fetchMetadata(true);
     setDates(startDate, endDate);
   }, [startDate, endDate]);
 

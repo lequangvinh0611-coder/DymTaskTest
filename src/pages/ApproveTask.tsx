@@ -533,6 +533,18 @@ const ApproveTask: React.FC = () => {
     fetchMetadata();
   }, []);
 
+  // Cập nhật các bộ lọc mặc định khi thông tin profile được tải xong
+  useEffect(() => {
+    if (profile) {
+      setFilterAssignee(isUser ? (profile.name || '') : '');
+      const isMasterOrAdmin = userRole === 'master' || userRole === 'admin';
+      const defaultTeamVal = (isMasterOrAdmin && profile.team_ids && profile.team_ids.length > 0)
+        ? profile.team_ids.join(',')
+        : (profile.team_ids?.[0] || '');
+      setFilterTeam(defaultTeamVal);
+    }
+  }, [profile, userRole, isUser]);
+
   const parsedRequests = useMemo(() => {
     return requests.map(req => {
       const meta = parseTaskDescription(req.description);
