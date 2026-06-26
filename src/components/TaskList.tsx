@@ -3,7 +3,7 @@ import {
   Search, RotateCcw, Clock, Check, AlertCircle, ChevronLeft, ChevronRight, 
   X, Calendar, Download, RefreshCw, Layers, CheckSquare, Square, Loader2
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, safeBroadcast } from '../lib/supabase';
 import { DateRangePicker } from './ui/DateRangePicker';
 import { FilterSelect } from './ui/FilterSelect';
 import { SearchableFilterSelect } from './ui/SearchableFilterSelect';
@@ -1321,6 +1321,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       await logger.log('SUBMIT_TASK', `Submitted task [${getDisplayId(task)}]: ${task.title || 'Untitled'} (${task.todo_date})`, { taskId: task.id, finalStatus: newStatus });
       await checkAndToggleOnetimeTemplateStatus(task.id);
       toast.success('Task completed successfully!');
+      safeBroadcast('task_logs_changed', { todo_date: task.todo_date });
     } catch (err: any) {
       console.error('Error submitting task:', err);
       toast.error(`An error occurred during submit: ${err.message || 'Unknown error'}`);
@@ -1409,6 +1410,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       await logger.log('RESET_TASK', `Reset task status [${getDisplayId(task)}]: ${task.title || 'Untitled'} (${task.todo_date})`, { taskId: task.id });
       await checkAndToggleOnetimeTemplateStatus(task.id);
       toast.success('Task reset successfully!');
+      safeBroadcast('task_logs_changed', { todo_date: task.todo_date });
     } catch (err: any) {
       console.error('Error resetting task:', err);
       toast.error(`Reset failed: ${err.message || 'Unknown error'}`);
@@ -1558,6 +1560,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       await logger.log('SKIP_TASK', `Skipped task [${getDisplayId(task)}]: ${task.title || 'Untitled'} (${task.todo_date})`, { taskId: task.id });
       await checkAndToggleOnetimeTemplateStatus(task.id);
       toast.success('Task skipped successfully!');
+      safeBroadcast('task_logs_changed', { todo_date: task.todo_date });
     } catch (err: any) {
       console.error('Error skipping task:', err);
       toast.error(`Skip failed: ${err.message || 'Unknown error'}`);
@@ -1565,9 +1568,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   };
 
   // Update specific sub-task work characteristics (Actual Minutes or Status) inside the drawer locally
-  const handleUpdateSubtaskValueLocal = (
+  const handleUpdateSubtaskValueLocal = async (
     subtaskId: string, 
-    fields: Partial<Pick<SubTask, 'actual_time' | 'sub_status'>>
+    fields: Partial<Pick<SubTask, 'actual_time' | 'sub_status'>>,
+    saveImmediately: boolean = false
   ) => {
     if (!openedTask) return;
 
@@ -1593,13 +1597,21 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     const calculated_est_time = updatedSubTasks.reduce((sum, sub) => sum + (Number(sub.est_time) || 0), 0);
     const calculated_actual_time = updatedSubTasks.reduce((sum, sub) => sum + (sub.sub_status === 'Done' ? (Number(sub.actual_time) || 0) : 0), 0);
 
-    setOpenedTask({
+    const updatedTask = {
       ...openedTask,
       sub_tasks: updatedSubTasks,
       est_time: calculated_est_time,
       actual_time: calculated_actual_time
-    });
-    setDrawerHasChanges(true);
+    };
+
+    setOpenedTask(updatedTask);
+    
+    if (saveImmediately) {
+      setDrawerHasChanges(false);
+      await saveOpenedTaskChanges(updatedTask);
+    } else {
+      setDrawerHasChanges(true);
+    }
   };
 
   // Save accumulated sub-task changes to Supabase upon drawer closing
@@ -1760,6 +1772,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
       await checkAndToggleOnetimeTemplateStatus(taskToSave.id);
       toast.success('Changes saved successfully!');
+      safeBroadcast('task_logs_changed', { todo_date: taskToSave.todo_date });
     } catch (err: any) {
       console.error('Error saving task edits on close:', err);
       toast.error(`Failed to save changes: ${err.message || 'Unknown error'}`);
@@ -2146,6 +2159,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       }
 
       toast.success(`Successfully skipped ${selectedTaskIds.size} tasks!`);
+      const uniqueDates = Array.from(new Set(Object.values(updatedIdsMap)));
+      uniqueDates.forEach(date => {
+        safeBroadcast('task_logs_changed', { todo_date: date });
+      });
     } catch (err: any) {
       console.error('Error in Quick Skip batch:', err);
       toast.error(`An error occurred: ${err.message}`);
@@ -2345,6 +2362,10 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       }
 
       toast.success(`Successfully completed ${selectedTaskIds.size} tasks!`);
+      const uniqueDates = Array.from(new Set(Object.values(updatedIdsMap)));
+      uniqueDates.forEach(date => {
+        safeBroadcast('task_logs_changed', { todo_date: date });
+      });
     } catch (err: any) {
       console.error('Error in Quick Submit batch:', err);
       toast.error(`An error occurred: ${err.message}`);
@@ -3074,7 +3095,17 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                                     }
                                     handleUpdateSubtaskValueLocal(sub.id, { 
                                       actual_time: parsedVal 
-                                    });
+                                    }, false);
+                                  }}
+                                  onBlur={(e) => {
+                                    const val = e.target.value;
+                                    let parsedVal = val === '' ? undefined : Math.max(0, parseInt(val) || 0);
+                                    if (parsedVal !== undefined && parsedVal > 10000) {
+                                      parsedVal = 10000;
+                                    }
+                                    handleUpdateSubtaskValueLocal(sub.id, { 
+                                      actual_time: parsedVal 
+                                    }, true);
                                   }}
                                 />
                               </div>
@@ -3092,7 +3123,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                                   // Auto set mins if setting to Done
                                   ...(nextVal === 'Done' && (sub.actual_time === 0 || sub.actual_time === undefined) ? { actual_time: sub.est_time } : {}),
                                   ...(nextVal === 'Skipped' ? { actual_time: 0 } : {})
-                                });
+                                }, true);
                               }}
                             >
                               <option value="New">New</option>

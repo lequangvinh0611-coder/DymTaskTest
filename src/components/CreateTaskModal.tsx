@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Trash2, Clock, Loader2, Plus, Calendar } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, safeBroadcast } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/authStore';
 import { logger } from '../lib/logger';
@@ -1108,6 +1108,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
 
       await useAppStore.getState().fetchTasks(true);
       toast.success(isEditMode ? 'Cập nhật bản mẫu thành công!' : 'Tạo bản mẫu thành công!');
+      safeBroadcast('tasks_changed');
       onSuccess();
       onClose();
     } catch (err: any) {

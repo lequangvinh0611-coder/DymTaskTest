@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, Edit2, MoreHorizontal, X, HelpCircle,
   Building, Briefcase, Tag, Users, Check, AlertCircle, FileSpreadsheet, Loader2, History, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, safeBroadcast } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import CreateTaskModal from '../components/CreateTaskModal';
 import CreateApproveTaskModal from '../components/CreateApproveTaskModal';
@@ -622,6 +622,7 @@ const TaskManager: React.FC = () => {
       );
 
       toast.success(`Successfully updated task status to ${nextStatus}!`);
+      safeBroadcast('tasks_changed');
     } catch (err: any) {
       console.error('Error toggling task status:', err);
       toast.error(`Could not change status: ${err.message}`);
@@ -668,6 +669,7 @@ const TaskManager: React.FC = () => {
           }
           setActiveMenuTaskId(null);
           toast.success("Task template deleted successfully!");
+          safeBroadcast('tasks_changed');
         } catch (err: any) {
           console.error('Error deleting task:', err);
           toast.error(`Could not delete task: ${err.message}`);
