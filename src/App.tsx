@@ -70,7 +70,11 @@ export default function App() {
       const subscribeRealtime = () => {
         if (channelRef.current) return;
 
-        const channel = supabase.channel('global_app_realtime_sync')
+        const channel = supabase.channel('global_app_realtime_sync', {
+          config: {
+            broadcast: { self: true }
+          }
+        })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
             debouncedFetchTemplatesAndDaily();
           })

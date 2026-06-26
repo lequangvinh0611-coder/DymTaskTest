@@ -558,8 +558,15 @@ const checkAndToggleOnetimeTemplateStatus = async (taskId: string) => {
         }
         return t;
       });
-      return { dailyTasks: nextDailyTasks };
+      const nextTasks = state.tasks.map(t => {
+        if (t.id === taskId) {
+          return { ...t, status: nextStatus, is_active: nextActive };
+        }
+        return t;
+      });
+      return { dailyTasks: nextDailyTasks, tasks: nextTasks };
     });
+    safeBroadcast('tasks_changed');
   }
 };
 

@@ -339,6 +339,21 @@ const TaskManager: React.FC = () => {
 
   useEffect(() => {
     if (openedDrawerTask) {
+      const updatedTask = tasks.find(t => t.id === openedDrawerTask.id);
+      if (updatedTask) {
+        const strA = JSON.stringify(updatedTask);
+        const strB = JSON.stringify(openedDrawerTask);
+        if (strA !== strB) {
+          setOpenedDrawerTask(updatedTask);
+        }
+      } else {
+        setOpenedDrawerTask(null);
+      }
+    }
+  }, [tasks, openedDrawerTask]);
+
+  useEffect(() => {
+    if (openedDrawerTask) {
       setDrawerTab('details');
     }
   }, [openedDrawerTask]);
