@@ -80,13 +80,19 @@ CREATE TABLE IF NOT EXISTS public.tasks (
     assignees TEXT[] DEFAULT '{}',
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    created_by TEXT,
+    updated_by TEXT
 );
 
 -- If table already exists, ensure columns are present
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS team_ids TEXT[] DEFAULT '{}';
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS display_id SERIAL; -- Note: Adding SERIAL to existing column is tricky, usually better to create with it.
 ALTER TABLE public.tasks ADD CONSTRAINT tasks_display_id_unique UNIQUE (display_id);
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL;
 
 -- 4. Create Subtasks Table
 CREATE TABLE IF NOT EXISTS public.subtasks (
@@ -99,8 +105,15 @@ CREATE TABLE IF NOT EXISTS public.subtasks (
     status TEXT DEFAULT 'PENDING',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    team_name TEXT
+    team_name TEXT,
+    created_by TEXT,
+    updated_by TEXT
 );
+
+ALTER TABLE public.subtasks ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE public.subtasks ADD COLUMN IF NOT EXISTS updated_by TEXT;
+ALTER TABLE public.subtasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT now();
+ALTER TABLE public.subtasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS idx_subtasks_task_id ON public.subtasks (task_id);
 
@@ -256,13 +269,12 @@ CREATE POLICY "Master update" ON public.users FOR UPDATE USING (public.check_is_
 CREATE POLICY "Master delete" ON public.users FOR DELETE USING (public.check_is_master());
 
 -- Functions & Triggers for updated_at
-CREATE OR REPLACE FUNCTION update_modified_column()
+CREATE OR REPLACE FUNCTION public.update_modified_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at = now();
+    NEW.updated_at = timezone('utc'::text, now());
     RETURN NEW;
 END;
-EXCEPTION WHEN duplicate_function THEN NULL; END;
 $$ language 'plpgsql';
 
 -- 11. Enable Realtime (Idempotent)

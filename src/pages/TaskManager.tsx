@@ -471,11 +471,33 @@ const TaskManager: React.FC = () => {
               id: st.id,
               content: st.content || '',
               assignee: st.assignee || '',
-              est_time: st.est_time || st.estimated_minutes || 0
+              est_time: st.est_time || st.estimated_minutes || 0,
+              created_by: st.created_by,
+              updated_by: st.updated_by,
+              created_at: st.created_at,
+              updated_at: st.updated_at
             }))
           : [],
-        last_updated_by: '',
-        last_updated_at: ''
+        last_updated_by: (task as any).updated_by || (() => {
+          const logs = (task as any).task_logs || [];
+          const sorted = [...logs].sort((a: any, b: any) => {
+            const tA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+            const tB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+            return tB - tA;
+          });
+          return sorted[0]?.updated_by || '';
+        })(),
+        last_updated_at: (task as any).updated_at 
+          ? formatDateTime((task as any).updated_at) 
+          : (() => {
+              const logs = (task as any).task_logs || [];
+              const sorted = [...logs].sort((a: any, b: any) => {
+                const tA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                const tB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                return tB - tA;
+              });
+              return sorted[0]?.updated_at ? formatDateTime(sorted[0].updated_at) : '';
+            })()
       };
     });
   }, [tasks]);
@@ -816,40 +838,67 @@ const TaskManager: React.FC = () => {
       'EST TIME', 
       'STATUS', 
       'NOTE',
+      'CREATED BY',
+      'CREATED TIME',
       'SUBTASK CONTENT', 
       'ASSIGNEE', 
       'LASTUPDATED USER', 
       'LASTUPDATED TIME'
     ];
 
-    const csvContent = [
-      headers.join(','),
-      ...filteredTasks.map(task => {
-        const subtasks = task.sub_tasks || [];
-        const subContent = subtasks.map((s: any) => s.content || '').filter(Boolean).join(', ');
-        const subAssignees = subtasks.map((s: any) => s.assignee || '').filter(Boolean).filter((val: string, i: number, arr: string[]) => arr.indexOf(val) === i).join(', ');
+    const rows: string[][] = [];
 
-        const updatedUser = (task as any).last_updated_by || 'Unknown';
-        const updatedTime = formatDateTime(task.created_at || task.updated_at);
+    filteredTasks.forEach(task => {
+      const creatorUser = task.created_by || '';
+      const creatorTime = task.created_at ? formatDateTime(task.created_at) : '';
 
-        return [
-          `"\t${getDisplayId(task)}"`,
-          `"${(task.title || '').replace(/"/g, '""')}"`,
-          `"${(task.project_name || '').replace(/"/g, '""')}"`,
-          `"${(task.tag_name || '').replace(/"/g, '""')}"`,
-          `"${(getTaskTeams(task.sub_tasks, task.team_name).allTeams.join(', ') || 'No Team').replace(/"/g, '""')}"`,
-          `"${task.task_type || ''}"`,
-          `"${(task.deadline_days || '').replace(/"/g, '""')}"`,
-          `"${task.deadline_time || ''}"`,
-          `"${task.est_time || 0}m"`,
-          `"${task.status || 'ON'}"`,
-          `"${(task.meta?.note || '').replace(/"/g, '""')}"`,
-          `"${subContent.replace(/"/g, '""')}"`,
-          `"${subAssignees.replace(/"/g, '""')}"`,
+      const parentInfo = [
+        `"\t${getDisplayId(task)}"`,
+        `"${(task.title || '').replace(/"/g, '""')}"`,
+        `"${(task.project_name || '').replace(/"/g, '""')}"`,
+        `"${(task.tag_name || '').replace(/"/g, '""')}"`,
+        `"${(getTaskTeams(task.sub_tasks, task.team_name).allTeams.join(', ') || 'No Team').replace(/"/g, '""')}"`,
+        `"${task.task_type || ''}"`,
+        `"${(formatDisplayDate(task.deadline_days) || '').replace(/"/g, '""')}"`,
+        `"${task.deadline_time || ''}"`,
+        `"${task.est_time || 0}m"`,
+        `"${task.status || 'ON'}"`,
+        `"${(task.meta?.note || '').replace(/"/g, '""')}"`,
+        `"${creatorUser.replace(/"/g, '""')}"`,
+        `"${creatorTime}"`
+      ];
+
+      const updatedUser = task.last_updated_by || '';
+      const updatedTime = task.last_updated_at || '';
+
+      const subtasks = task.sub_tasks || [];
+
+      if (subtasks.length === 0) {
+        rows.push([
+          ...parentInfo,
+          '""', // SUBTASK CONTENT
+          '""', // ASSIGNEE
           `"${updatedUser.replace(/"/g, '""')}"`,
           `"${updatedTime}"`
-        ].join(',');
-      })
+        ]);
+      } else {
+        subtasks.forEach((sub: any) => {
+          const subUser = sub.updated_by || updatedUser;
+          const subTime = sub.updated_at ? formatDateTime(sub.updated_at) : updatedTime;
+          rows.push([
+            ...parentInfo,
+            `"${(sub.content || '').replace(/"/g, '""')}"`,
+            `"${(sub.assignee || '').replace(/"/g, '""')}"`,
+            `"${subUser.replace(/"/g, '""')}"`,
+            `"${subTime}"`
+          ]);
+        });
+      }
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(r => r.join(','))
     ].join('\n');
 
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });

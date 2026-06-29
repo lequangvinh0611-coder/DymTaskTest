@@ -991,7 +991,8 @@ const ApproveTask: React.FC = () => {
               tag_name: request.meta.tag_name || '',
               deadline_time: finalDeadlineTime,
               deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays],
-              history: request.history || updatedVersions
+              history: request.history || updatedVersions,
+              updated_by: updaterName
             })
             .eq('id', request.meta.original_task_id);
 
@@ -1025,7 +1026,8 @@ const ApproveTask: React.FC = () => {
                 content: st.content,
                 assignee: st.assignee,
                 est_time: Number(st.est_time || st.estimated_minutes || 0),
-                team_name: request.meta.team_name || ''
+                team_name: request.meta.team_name || '',
+                updated_by: updaterName
               });
               seenDbIds.add(matchedDbSub.id);
             } else {
@@ -1035,7 +1037,9 @@ const ApproveTask: React.FC = () => {
                 assignee: st.assignee,
                 est_time: Number(st.est_time || st.estimated_minutes || 0),
                 status: 'PENDING',
-                team_name: request.meta.team_name || ''
+                team_name: request.meta.team_name || '',
+                created_by: request.creator_name || updaterName,
+                updated_by: updaterName
               });
             }
           });
@@ -1092,7 +1096,9 @@ const ApproveTask: React.FC = () => {
             tag_name: request.meta.tag_name || '',
             deadline_time: finalDeadlineTime,
             deadline_days: deadlineDaysArray && deadlineDaysArray.length > 0 ? deadlineDaysArray : [finalDeadlineDays],
-            history: request.history || []
+            history: request.history || [],
+            created_by: request.creator_name || updaterName,
+            updated_by: updaterName
           }])
           .select();
 
@@ -1109,7 +1115,9 @@ const ApproveTask: React.FC = () => {
           assignee: st.assignee,
           est_time: Number(st.est_time || st.estimated_minutes || 0),
           status: 'PENDING',
-          team_name: request.meta.team_name || ''
+          team_name: request.meta.team_name || '',
+          created_by: request.creator_name || updaterName,
+          updated_by: updaterName
         }));
 
         if (subtasksToInsert.length > 0) {

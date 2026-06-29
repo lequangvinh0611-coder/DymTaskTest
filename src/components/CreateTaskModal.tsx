@@ -876,7 +876,9 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
         tag_name: tag || '',
         deadline_time: deadlineTime24h ? (deadlineTime24h.includes(':') && deadlineTime24h.split(':').length === 2 ? `${deadlineTime24h}:00` : deadlineTime24h) : null,
         deadline_days: deadlineDaysArray,
-        history: updatedVersions
+        history: updatedVersions,
+        updated_by: updaterName,
+        ...(isEditMode ? {} : { created_by: updaterName })
       };
 
       if (isEditMode && taskToEdit && taskType !== 'ONETIME' && scope === 'TODAY_ONLY') {
@@ -1040,7 +1042,8 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               assignee: st.assignee,
               est_time: st.est_time || st.estimated_minutes || 0,
               status: 'PENDING',
-              team_name: team || ''
+              team_name: team || '',
+              updated_by: updaterName
             });
           } else {
             subTasksToInsert.push({
@@ -1049,7 +1052,9 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
               assignee: st.assignee,
               est_time: st.est_time || st.estimated_minutes || 0,
               status: 'PENDING',
-              team_name: team || ''
+              team_name: team || '',
+              created_by: updaterName,
+              updated_by: updaterName
             });
           }
         });
@@ -1117,7 +1122,9 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
           assignee: st.assignee,
           est_time: st.est_time || st.estimated_minutes || 0,
           status: 'PENDING',
-          team_name: team || ''
+          team_name: team || '',
+          created_by: updaterName,
+          updated_by: updaterName
         }));
 
         if (subtasksToInsert.length > 0) {

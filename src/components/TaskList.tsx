@@ -663,6 +663,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
   // Drawer slider panel
   const [openedTask, setOpenedTask] = useState<VirtualTask | null>(null);
   const [drawerHasChanges, setDrawerHasChanges] = useState(false);
+  const [isDrawerClosing, setIsDrawerClosing] = useState(false);
 
   // Initial tasks loader fetching active records using global app state
   const loadActiveTasks = async () => {
@@ -758,6 +759,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             ? matchedLog.task_type
             : type;
 
+          const parent_last_updated_by = matchedLog ? (matchedLog.updated_by || '') : '';
+          const parent_last_updated_at = matchedLog ? (matchedLog.updated_at || '') : '';
+
           // Map subtasks for this occurrence date
           const matchedLogsForDate = useLogData 
             ? (task.subtask_logs || []).filter((l: any) => l.todo_date === occ.todo_date)
@@ -784,7 +788,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   ? undefined
                   : (log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : (log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? (log.est_time || log.estimated_minutes || 0) : 0))),
                 sub_status,
-                team_name: log.team_name || ''
+                team_name: log.team_name || '',
+                last_updated_by: log.completed_by || '',
+                last_updated_at: log.updated_at || ''
               };
             });
             // Sort to preserve original template subtask sequence
@@ -824,7 +830,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                 assignee: sub.assignee,
                 est_time: sub.est_time !== undefined ? sub.est_time : (sub.estimated_minutes || 0),
                 actual_time: resolved_actual,
-                sub_status
+                sub_status,
+                last_updated_by: log ? (log.completed_by || '') : '',
+                last_updated_at: log ? (log.updated_at || '') : ''
               };
             });
           }
@@ -849,6 +857,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
           list.push({
             ...task,
+            meta,
             title: resolved_title,
             task_type: resolved_task_type,
             project_name,
@@ -862,7 +871,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
             todo_date: occ.todo_date,
             todo_status,
             sub_tasks,
-            completion_key: occ.completion_key
+            completion_key: occ.completion_key,
+            last_updated_by: parent_last_updated_by,
+            last_updated_at: parent_last_updated_at
           });
         });
       } else {
@@ -909,6 +920,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               ? matchedLog.task_type
               : type;
 
+            const parent_last_updated_by = matchedLog ? (matchedLog.updated_by || '') : '';
+            const parent_last_updated_at = matchedLog ? (matchedLog.updated_at || '') : '';
+
             const matchedLogsForDate = useLogData 
               ? (task.subtask_logs || []).filter((l: any) => l.todo_date === todo_date)
               : [];
@@ -932,7 +946,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   est_time: log.est_time !== undefined && log.est_time !== null ? log.est_time : (log.estimated_minutes !== undefined ? log.estimated_minutes : 0),
                   actual_time: log.actual_time !== undefined && log.actual_time !== null ? log.actual_time : (log.actual_minutes !== undefined ? log.actual_minutes : (sub_status === 'Done' ? (log.est_time || log.estimated_minutes || 0) : 0)),
                   sub_status,
-                  team_name: log.team_name || ''
+                  team_name: log.team_name || '',
+                  last_updated_by: log.completed_by || '',
+                  last_updated_at: log.updated_at || ''
                 };
               });
               // Sort to preserve original template subtask sequence
@@ -970,7 +986,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                   assignee: sub.assignee,
                   est_time: sub.est_time !== undefined ? sub.est_time : (sub.estimated_minutes || 0),
                   actual_time: resolved_actual,
-                  sub_status
+                  sub_status,
+                  last_updated_by: log ? (log.completed_by || '') : '',
+                  last_updated_at: log ? (log.updated_at || '') : ''
                 };
               });
             }
@@ -994,6 +1012,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
             list.push({
               ...task,
+              meta,
               title: resolved_title,
               task_type: resolved_task_type,
               project_name,
@@ -1006,7 +1025,9 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
               virtual_id: `${task.id}_${todo_date}`,
               todo_date,
               todo_status,
-              sub_tasks
+              sub_tasks,
+              last_updated_by: parent_last_updated_by,
+              last_updated_at: parent_last_updated_at
             });
           }
         });
@@ -1018,7 +1039,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
 
   // Sync opened task dynamically inside the slider drawer (skip when actively editing)
   useEffect(() => {
-    if (openedTask && !drawerHasChanges) {
+    if (openedTask && !drawerHasChanges && !isDrawerClosing) {
       const updatedOpenedTask = virtualTasks.find(t => t.virtual_id === openedTask.virtual_id);
       if (updatedOpenedTask) {
         const strA = JSON.stringify(updatedOpenedTask);
@@ -1028,7 +1049,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         }
       }
     }
-  }, [virtualTasks, openedTask, drawerHasChanges]);
+  }, [virtualTasks, openedTask, drawerHasChanges, isDrawerClosing]);
 
   // Extract dynamically options list
   const assigneesOptions = useMemo(() => {
@@ -1643,18 +1664,31 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     const allSkipped = updatedSubTasks.length > 0 && updatedSubTasks.every(sub => (sub.sub_status || 'New') === 'Skipped');
     const newStatus = allSkipped ? 'SKIPPED' : (hasNewSubTask ? 'NEW' : 'DONE');
 
+    const isAutoClosing = fields.sub_status !== undefined && updatedSubTasks.length > 0 && !hasNewSubTask && saveImmediately;
+
     const updatedTask = {
       ...openedTask,
       sub_tasks: updatedSubTasks,
       est_time: calculated_est_time,
       actual_time: calculated_actual_time,
-      todo_status: newStatus
+      todo_status: isAutoClosing ? 'NEW' : newStatus
     };
 
     setOpenedTask(updatedTask);
     
     if (saveImmediately) {
       setDrawerHasChanges(false);
+
+      // Tự động đóng drawer khi cập nhật trạng thái của tất cả subtask (không còn subtask nào ở trạng thái 'New')
+      if (isAutoClosing) {
+        setIsDrawerClosing(true);
+        setTimeout(() => {
+          setOpenedTask(null);
+          setIsDrawerClosing(false);
+          setDrawerHasChanges(false);
+        }, 500);
+      }
+
       await saveOpenedTaskChanges(updatedTask, false);
     } else {
       setDrawerHasChanges(true);
@@ -1977,6 +2011,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     if (drawerHasChanges && openedTask) {
       await saveOpenedTaskChanges(openedTask, true);
     }
+    setIsDrawerClosing(false);
     setOpenedTask(null);
     setDrawerHasChanges(false);
   };
@@ -1986,13 +2021,14 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     if (drawerHasChanges && openedTask) {
       await saveOpenedTaskChanges(openedTask, true);
     }
+    setIsDrawerClosing(false);
     setOpenedTask(task);
     setDrawerHasChanges(false);
   };
 
   // Export current listings to CSV spreadsheet
   const handleExportCsv = () => {
-    if (virtualTasks.length === 0) return;
+    if (filteredTasks.length === 0) return;
     
     const headers = [
       'ID', 
@@ -2007,6 +2043,8 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
       'EST TIME', 
       'STATUS', 
       'NOTE',
+      'CREATED BY',
+      'CREATED TIME',
       'SUBTASK CONTENT', 
       'ASSIGNEE', 
       'ACTUAL TIME', 
@@ -2016,48 +2054,12 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
     ];
 
     const rows: string[][] = [];
-    const myName = (profile?.name || '').toLowerCase().trim();
-
-    // Loop through virtual tasks but filter parent-level aspects like project, tag, teams, type, search and date first.
-    // Assignee and Status filters are checked and enforced at subtask level instead of parent task level!
-    const baseTasks = virtualTasks.filter(task => {
-      // 1. Search filter
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        const displayId = getDisplayId(task);
-        const matchTitle = (task.title || '').toLowerCase().includes(query);
-        const matchId = displayId.includes(query);
-        if (!matchTitle && !matchId) return false;
-      }
-
-      // 3. Tag filter
-      if (filterTag && task.tag_name !== filterTag) return false;
-
-      // 4. Project filter
-      if (filterProject && task.project_name !== filterProject) return false;
-
-      // 5. Team filter
-      if (selectedTeams.length > 0) {
-        const { allTeams } = getTaskTeams(task.sub_tasks, task.team_name);
-        const hasMatchingTeam = allTeams.some(t => selectedTeams.includes(t));
-        if (!hasMatchingTeam) return false;
-      }
-
-      // 6.5. Task Type filter
-      if (selectedTaskTypes.length > 0) {
-        if (!selectedTaskTypes.includes((task.task_type || '').toUpperCase())) return false;
-      }
-
-      // 7. Date Filter (matched to todo_date or creation date boundary)
-      if (startDate && endDate) {
-        const taskDate = task.todo_date;
-        if (taskDate < startDate || taskDate > endDate) return false;
-      }
-
-      return true;
-    });
+    const baseTasks = filteredTasks;
 
     baseTasks.forEach(task => {
+      const creatorUser = task.created_by || '';
+      const creatorTime = task.created_at ? formatDateTime(task.created_at) : '';
+
       const parentInfo = [
         `"\t${getDisplayId(task)}"`,
         `"${(task.title || '').replace(/"/g, '""')}"`,
@@ -2065,97 +2067,42 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
         `"${(task.tag_name || '').replace(/"/g, '""')}"`,
         `"${(getTaskTeams(task.sub_tasks, task.team_name).allTeams.join(', ') || 'No Team').replace(/"/g, '""')}"`,
         `"${task.task_type || ''}"`,
-        `"${(task.deadline_days || '').replace(/"/g, '""')}"`,
+        `"${(formatDisplayDate(task.deadline_days) || '').replace(/"/g, '""')}"`,
         `"${task.todo_date || ''}"`,
         `"${task.deadline_time || ''}"`,
         `"${task.est_time || 0}m"`,
         `"${task.todo_status || 'NEW'}"`,
-        `"${(task.meta?.note || '').replace(/"/g, '""')}"`
+        `"${(task.meta?.note || '').replace(/"/g, '""')}"`,
+        `"${creatorUser.replace(/"/g, '""')}"`,
+        `"${creatorTime}"`
       ];
-
-      const isRecurring = ['DAILY', 'WEEKLY', 'MONTHLY'].includes((task.task_type || '').toUpperCase());
-      let statusUpdatedBy = '';
-      let statusUpdatedAt = '';
-
-      if (isRecurring) {
-        const key = task.completion_key || task.todo_date;
-        const completion = task.meta?.completions?.[key] || task.meta?.completions?.[task.todo_date];
-        if (completion) {
-          statusUpdatedBy = completion.updated_by || '';
-          statusUpdatedAt = completion.updated_at || '';
-        }
-      } else {
-        statusUpdatedBy = task.meta?.updated_by || '';
-        statusUpdatedAt = task.meta?.updated_at || '';
-      }
-
-      const lastUpdatedUserCsv = statusUpdatedBy || '';
-      const lastUpdatedTimeCsv = statusUpdatedAt ? formatDateTime(statusUpdatedAt) : '';
 
       const subtasksList = task.sub_tasks || [];
 
       if (subtasksList.length === 0) {
-        // If there are no subtasks, apply filters on the parent task directly
-        let matchAssignee = true;
-        if (filterAssignee) {
-          if (filterAssignee === 'ME') {
-            matchAssignee = task.assignees?.some(a => (a || '').toLowerCase().trim() === myName) || false;
-          } else {
-            matchAssignee = task.assignees?.includes(filterAssignee) || false;
-          }
-        }
+        rows.push([
+          ...parentInfo,
+          '""', // SUBTASK CONTENT
+          '""', // ASSIGNEE
+          '"0m"', // ACTUAL TIME
+          '""', // SUBSTATUS
+          '""', // LASTUPDATED USER
+          '""'  // LASTUPDATED TIME
+        ]);
+      } else {
+        subtasksList.forEach((sub: any) => {
+          const subLastUpdatedUser = sub.last_updated_by || '';
+          const subLastUpdatedTime = sub.last_updated_at ? formatDateTime(sub.last_updated_at) : '';
 
-        let matchStatus = true;
-        if (filterTodoStatus) {
-          matchStatus = task.todo_status === filterTodoStatus;
-        }
-
-        if (matchAssignee && matchStatus) {
           rows.push([
             ...parentInfo,
-            '""', // SUBTASK CONTENT
-            '""', // ASSIGNEE
-            '"0m"', // ACTUAL TIME
-            '""', // SUBSTATUS
-            `"${lastUpdatedUserCsv.replace(/"/g, '""')}"`, // LASTUPDATED USER
-            `"${lastUpdatedTimeCsv}"`  // LASTUPDATED TIME
+            `"${(sub.content || '').replace(/"/g, '""')}"`,
+            `"${(sub.assignee || '').replace(/"/g, '""')}"`,
+            `"${sub.sub_status === 'Skipped' ? 0 : (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0)))}m"`,
+            `"${sub.sub_status || 'New'}"`,
+            `"${subLastUpdatedUser.replace(/"/g, '""')}"`, // LASTUPDATED USER
+            `"${subLastUpdatedTime}"`  // LASTUPDATED TIME
           ]);
-        }
-      } else {
-        // If there are subtasks, filter each subtask individually based on assignee & status!
-        subtasksList.forEach((sub: any) => {
-          let matchAssignee = true;
-          if (filterAssignee) {
-            if (filterAssignee === 'ME') {
-              matchAssignee = (sub.assignee || '').toLowerCase().trim() === myName;
-            } else {
-              matchAssignee = sub.assignee === filterAssignee;
-            }
-          }
-
-          let matchStatus = true;
-          if (filterTodoStatus) {
-            const subStatusUpper = (sub.sub_status || 'New').toUpperCase();
-            if (filterTodoStatus === 'DONE') {
-              matchStatus = subStatusUpper === 'DONE';
-            } else if (filterTodoStatus === 'SKIPPED') {
-              matchStatus = subStatusUpper === 'SKIPPED';
-            } else if (filterTodoStatus === 'NEW') {
-              matchStatus = subStatusUpper === 'NEW';
-            }
-          }
-
-          if (matchAssignee && matchStatus) {
-            rows.push([
-              ...parentInfo,
-              `"${(sub.content || '').replace(/"/g, '""')}"`,
-              `"${(sub.assignee || '').replace(/"/g, '""')}"`,
-              `"${sub.sub_status === 'Skipped' ? 0 : (sub.actual_time !== undefined && sub.actual_time !== null ? sub.actual_time : ((sub as any).actual_minutes !== undefined ? (sub as any).actual_minutes : (sub.est_time || (sub as any).estimated_minutes || 0)))}m"`,
-              `"${sub.sub_status || 'New'}"`,
-              `"${(lastUpdatedUserCsv || sub.last_updated_by || '').replace(/"/g, '""')}"`,
-              `"${lastUpdatedTimeCsv || formatDateTime(sub.last_updated_at)}"`
-            ]);
-          }
         });
       }
     });
@@ -3429,7 +3376,7 @@ const TaskList: React.FC<{ title?: string }> = ({ title = "To-do List" }) => {
                     ? "Reset draft (Template Offline)"
                     : "Reset task";
 
-                if (openedTask.todo_status === 'NEW') {
+                if (openedTask.todo_status === 'NEW' || isDrawerClosing) {
                   return (
                     <button 
                       disabled={true}
