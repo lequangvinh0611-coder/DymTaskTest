@@ -66,7 +66,7 @@ export default function App() {
         useAppStore.getState().fetchApproveTasks(true);
       }, 300);
 
-      // Hàm đăng ký realtime đồng bộ dữ liệu toàn cục
+      // Hàm đăng ký realtime đồng bộ dữ liệu toàn cục với cơ chế Local State Ingestion tối ưu cực kỳ cao
       const subscribeRealtime = () => {
         if (channelRef.current) return;
 
@@ -75,14 +75,177 @@ export default function App() {
             broadcast: { self: true }
           }
         })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload: any) => {
+            const state = useAppStore.getState();
+            const event = payload.eventType;
+            const newRecord = payload.new;
+            const oldRecord = payload.old;
+
+            if (event === 'INSERT') {
+              const enriched = {
+                ...newRecord,
+                subtasks: [],
+                task_logs: [],
+                subtask_logs: [],
+                assignees: []
+              };
+              const nextTasks = [enriched, ...state.tasks];
+              const nextDaily = newRecord.is_active ? [enriched, ...state.dailyTasks] : state.dailyTasks;
+              const nextActive = newRecord.is_active ? [enriched, ...state.activeTasksTemplates] : state.activeTasksTemplates;
+              useAppStore.setState({ tasks: nextTasks, dailyTasks: nextDaily, activeTasksTemplates: nextActive });
+            } else if (event === 'UPDATE') {
+              const { subtasks: legacySubs, ...cleanNew } = newRecord;
+              const updateTaskItem = (t: any) => {
+                if (t.id === newRecord.id) {
+                  return {
+                    ...t,
+                    ...cleanNew,
+                    subtasks: t.subtasks,
+                    task_logs: t.task_logs,
+                    subtask_logs: t.subtask_logs
+                  };
+                }
+                return t;
+              };
+              useAppStore.setState({
+                tasks: state.tasks.map(updateTaskItem),
+                dailyTasks: state.dailyTasks.map(updateTaskItem),
+                activeTasksTemplates: state.activeTasksTemplates.map(updateTaskItem)
+              });
+            } else if (event === 'DELETE') {
+              const filterOutTask = (t: any) => t.id !== oldRecord.id;
+              useAppStore.setState({
+                tasks: state.tasks.filter(filterOutTask),
+                dailyTasks: state.dailyTasks.filter(filterOutTask),
+                activeTasksTemplates: state.activeTasksTemplates.filter(filterOutTask)
+              });
+            }
             debouncedFetchTemplatesAndDaily();
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => {
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, (payload: any) => {
+            const state = useAppStore.getState();
+            const event = payload.eventType;
+            const newRecord = payload.new;
+            const oldRecord = payload.old;
+
+            if (event === 'INSERT') {
+              const insertSubtask = (t: any) => {
+                if (t.id === newRecord.task_id) {
+                  const existing = t.subtasks || [];
+                  if (existing.some((s: any) => s.id === newRecord.id)) return t;
+                  const sorted = [...existing, newRecord].sort((a: any, b: any) => {
+                    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                    return timeA - timeB;
+                  });
+                  return { ...t, subtasks: sorted };
+                }
+                return t;
+              };
+              useAppStore.setState({
+                tasks: state.tasks.map(insertSubtask),
+                dailyTasks: state.dailyTasks.map(insertSubtask),
+                activeTasksTemplates: state.activeTasksTemplates.map(insertSubtask)
+              });
+            } else if (event === 'UPDATE') {
+              const updateSubtask = (t: any) => {
+                if (t.id === newRecord.task_id) {
+                  return {
+                    ...t,
+                    subtasks: (t.subtasks || []).map((s: any) => s.id === newRecord.id ? { ...s, ...newRecord } : s)
+                  };
+                }
+                return t;
+              };
+              useAppStore.setState({
+                tasks: state.tasks.map(updateSubtask),
+                dailyTasks: state.dailyTasks.map(updateSubtask),
+                activeTasksTemplates: state.activeTasksTemplates.map(updateSubtask)
+              });
+            } else if (event === 'DELETE') {
+              const deleteSubtask = (t: any) => {
+                if (t.id === oldRecord.task_id) {
+                  return {
+                    ...t,
+                    subtasks: (t.subtasks || []).filter((s: any) => s.id !== oldRecord.id)
+                  };
+                }
+                return t;
+              };
+              useAppStore.setState({
+                tasks: state.tasks.map(deleteSubtask),
+                dailyTasks: state.dailyTasks.map(deleteSubtask),
+                activeTasksTemplates: state.activeTasksTemplates.map(deleteSubtask)
+              });
+            }
             debouncedFetchTemplatesAndDaily();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'task_logs' }, (payload: any) => {
             const state = useAppStore.getState();
+            const event = payload.eventType;
+            const newLog = payload.new;
+            const oldLog = payload.old;
+
+            if (event === 'INSERT' || event === 'UPDATE') {
+              const nextDailyTasks = state.dailyTasks.map(task => {
+                if (task.id === newLog.task_id) {
+                  const existingLogs = task.task_logs || [];
+                  const exists = existingLogs.some((l: any) => l.todo_date === newLog.todo_date);
+                  const updatedLogs = exists
+                    ? existingLogs.map((l: any) => l.todo_date === newLog.todo_date ? { ...l, ...newLog } : l)
+                    : [...existingLogs, newLog];
+
+                  let todo_status: 'NEW' | 'DONE' | 'SKIPPED' = 'NEW';
+                  const tLog = updatedLogs.find((l: any) => l.todo_date === newLog.todo_date);
+                  if (tLog) {
+                    const normalized = (tLog.status || '').toUpperCase();
+                    if (normalized === 'DONE' || normalized === 'SUBMITTED') {
+                      todo_status = 'DONE';
+                    } else if (normalized === 'SKIPPED') {
+                      todo_status = 'SKIPPED';
+                    }
+                  }
+
+                  return {
+                    ...task,
+                    task_logs: updatedLogs,
+                    todo_status
+                  };
+                }
+                return task;
+              });
+
+              const nextTasks = state.tasks.map(task => {
+                if (task.id === newLog.task_id) {
+                  const existingLogs = task.task_logs || [];
+                  const exists = existingLogs.some((l: any) => l.todo_date === newLog.todo_date);
+                  const updatedLogs = exists
+                    ? existingLogs.map((l: any) => l.todo_date === newLog.todo_date ? { ...l, ...newLog } : l)
+                    : [...existingLogs, newLog];
+                  return { ...task, task_logs: updatedLogs };
+                }
+                return task;
+              });
+
+              useAppStore.setState({ dailyTasks: nextDailyTasks, tasks: nextTasks });
+            } else if (event === 'DELETE') {
+              const nextDailyTasks = state.dailyTasks.map(task => {
+                if (task.id === oldLog.task_id) {
+                  const updatedLogs = (task.task_logs || []).filter((l: any) => l.id !== oldLog.id);
+                  return { ...task, task_logs: updatedLogs, todo_status: 'NEW' as const };
+                }
+                return task;
+              });
+              const nextTasks = state.tasks.map(task => {
+                if (task.id === oldLog.task_id) {
+                  const updatedLogs = (task.task_logs || []).filter((l: any) => l.id !== oldLog.id);
+                  return { ...task, task_logs: updatedLogs };
+                }
+                return task;
+              });
+              useAppStore.setState({ dailyTasks: nextDailyTasks, tasks: nextTasks });
+            }
+
             const targetDate = payload.new?.todo_date || payload.old?.todo_date;
             if (targetDate && state.startDate && state.endDate) {
               if (targetDate >= state.startDate && targetDate <= state.endDate) {
@@ -94,6 +257,96 @@ export default function App() {
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'subtask_logs' }, (payload: any) => {
             const state = useAppStore.getState();
+            const event = payload.eventType;
+            const newLog = payload.new;
+            const oldLog = payload.old;
+
+            if (event === 'INSERT' || event === 'UPDATE') {
+              const nextDailyTasks = state.dailyTasks.map(task => {
+                if (task.id === newLog.task_id) {
+                  const existingLogs = task.subtask_logs || [];
+                  const exists = existingLogs.some((l: any) => l.id === newLog.id || (l.subtask_id === newLog.subtask_id && l.todo_date === newLog.todo_date));
+                  const updatedLogs = exists
+                    ? existingLogs.map((l: any) => (l.id === newLog.id || (l.subtask_id === newLog.subtask_id && l.todo_date === newLog.todo_date)) ? { ...l, ...newLog } : l)
+                    : [...existingLogs, newLog];
+
+                  const updatedSubtasks = (task.subtasks || []).map((sub: any) => {
+                    if (sub.id === newLog.subtask_id) {
+                      const subtaskLogs = sub.subtask_logs || [];
+                      const subLogExists = subtaskLogs.some((sl: any) => sl.id === newLog.id || sl.todo_date === newLog.todo_date);
+                      const nextSubLogs = subLogExists
+                        ? subtaskLogs.map((sl: any) => (sl.id === newLog.id || sl.todo_date === newLog.todo_date) ? { ...sl, ...newLog, est_time: newLog.est_time ?? sl.est_time, actual_time: newLog.actual_time ?? sl.actual_time } : sl)
+                        : [...subtaskLogs, { ...newLog, est_time: newLog.est_time ?? newLog.estimated_minutes, actual_time: newLog.actual_time ?? newLog.actual_minutes }];
+
+                      let sub_status = 'New';
+                      const sUpper = (newLog.status || '').toUpperCase();
+                      if (sUpper === 'DONE' || sUpper === 'SUBMITTED' || newLog.is_completed) {
+                        sub_status = 'Done';
+                      } else if (sUpper === 'SKIPPED') {
+                        sub_status = 'Skipped';
+                      }
+
+                      return {
+                        ...sub,
+                        actual_time: newLog.actual_time ?? newLog.actual_minutes ?? sub.actual_time,
+                        sub_status,
+                        subtask_logs: nextSubLogs
+                      };
+                    }
+                    return sub;
+                  });
+
+                  return {
+                    ...task,
+                    subtasks: updatedSubtasks,
+                    subtask_logs: updatedLogs
+                  };
+                }
+                return task;
+              });
+
+              const nextTasks = state.tasks.map(task => {
+                if (task.id === newLog.task_id) {
+                  const existingLogs = task.subtask_logs || [];
+                  const exists = existingLogs.some((l: any) => l.id === newLog.id || (l.subtask_id === newLog.subtask_id && l.todo_date === newLog.todo_date));
+                  const updatedLogs = exists
+                    ? existingLogs.map((l: any) => (l.id === newLog.id || (l.subtask_id === newLog.subtask_id && l.todo_date === newLog.todo_date)) ? { ...l, ...newLog } : l)
+                    : [...existingLogs, newLog];
+                  return { ...task, subtask_logs: updatedLogs };
+                }
+                return task;
+              });
+
+              useAppStore.setState({ dailyTasks: nextDailyTasks, tasks: nextTasks });
+            } else if (event === 'DELETE') {
+              const nextDailyTasks = state.dailyTasks.map(task => {
+                if (task.id === oldLog.task_id) {
+                  const updatedLogs = (task.subtask_logs || []).filter((l: any) => l.id !== oldLog.id);
+                  const updatedSubtasks = (task.subtasks || []).map((sub: any) => {
+                    if (sub.id === oldLog.subtask_id) {
+                      const nextSubLogs = (sub.subtask_logs || []).filter((sl: any) => sl.id !== oldLog.id);
+                      return {
+                        ...sub,
+                        sub_status: 'New',
+                        subtask_logs: nextSubLogs
+                      };
+                    }
+                    return sub;
+                  });
+                  return { ...task, subtasks: updatedSubtasks, subtask_logs: updatedLogs };
+                }
+                return task;
+              });
+              const nextTasks = state.tasks.map(task => {
+                if (task.id === oldLog.task_id) {
+                  const updatedLogs = (task.subtask_logs || []).filter((l: any) => l.id !== oldLog.id);
+                  return { ...task, subtask_logs: updatedLogs };
+                }
+                return task;
+              });
+              useAppStore.setState({ dailyTasks: nextDailyTasks, tasks: nextTasks });
+            }
+
             const targetDate = payload.new?.todo_date || payload.old?.todo_date;
             if (targetDate && state.startDate && state.endDate) {
               if (targetDate >= state.startDate && targetDate <= state.endDate) {
@@ -115,7 +368,22 @@ export default function App() {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'tags' }, () => {
             debouncedFetchMetadata();
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'approve_tasks' }, () => {
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'approve_tasks' }, (payload: any) => {
+            const state = useAppStore.getState();
+            const event = payload.eventType;
+            const newRecord = payload.new;
+            const oldRecord = payload.old;
+
+            if (event === 'INSERT') {
+              const nextApproveTasks = [...state.approveTasks.filter((t: any) => t.id !== newRecord.id), newRecord];
+              useAppStore.setState({ approveTasks: nextApproveTasks });
+            } else if (event === 'UPDATE') {
+              const nextApproveTasks = state.approveTasks.map((t: any) => t.id === newRecord.id ? { ...t, ...newRecord } : t);
+              useAppStore.setState({ approveTasks: nextApproveTasks });
+            } else if (event === 'DELETE') {
+              const nextApproveTasks = state.approveTasks.filter((t: any) => t.id !== oldRecord.id);
+              useAppStore.setState({ approveTasks: nextApproveTasks });
+            }
             debouncedFetchApproveTasks();
           })
           // Listen for custom broadcast events for instant synchronization (Dual-Sync architecture)

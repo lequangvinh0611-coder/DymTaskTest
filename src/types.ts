@@ -296,7 +296,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setDates: (start: string, end: string) => set({ startDate: start, endDate: end }),
 
   fetchMetadata: async (force = false) => {
-    if (!force && get().metadataLoading) return;
+    if (get().metadataLoading) return;
     if (get().metadataLoaded && !force) return;
     set({ metadataLoading: true });
     try {
@@ -347,7 +347,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchTasks: async (force = false) => {
-    if (!force && get().tasksLoading) return;
+    if (get().tasksLoading) return;
     if (get().tasksLoaded && !force) return;
     if (force) {
       set({ activeTasksTemplatesLoaded: false });
@@ -599,7 +599,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchApproveTasks: async (force = false) => {
-    if (!force && get().approveTasksLoading) return;
+    if (get().approveTasksLoading) return;
     if (get().approveTasksLoaded && !force) return;
     set({ approveTasksLoading: true });
     try {
@@ -621,7 +621,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchDailyTasks: async (startDateString: string, endDateString?: string, isSilent = false, forceTemplates = false, prefetchedData?: { tasksRaw: any[], allTaskLogs: any[], allSubtaskLogs: any[] }) => {
-    if (!isSilent && get().dailyTasksLoading) return;
+    if (get().dailyTasksLoading) return;
     set({ 
       dailyTasksLoading: true, 
       ...(isSilent ? {} : { dailyTasksLoaded: false })
