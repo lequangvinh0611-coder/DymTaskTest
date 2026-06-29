@@ -1595,11 +1595,11 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({ isOpen, onClose, onSu
                         type="number" 
                         min={0}
                         max={10000}
-                        value={(sub.est_time === undefined ? '' : (sub.est_time === 0 ? '' : sub.est_time))}
+                        value={sub.est_time === undefined || sub.est_time === null ? '' : sub.est_time}
                         className="w-full h-8 px-2 bg-slate-50 border border-slate-200 rounded-md text-xs font-medium text-slate-700 focus:outline-none focus:bg-white focus:border-indigo-400 font-mono text-center"
                         placeholder="Min"
                         onChange={(e) => {
-                          const val = Math.min(10000, Math.max(0, parseInt(e.target.value) || 0));
+                          const val = e.target.value === '' ? 0 : Math.min(10000, Math.max(0, parseInt(e.target.value) || 0));
                           handleUpdateSubTaskField(sub.id, 'est_time', val);
                         }}
                       />
